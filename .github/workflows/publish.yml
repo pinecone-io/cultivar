@@ -1,0 +1,27 @@
+name: Publish to PyPI
+
+# Publishes via PyPI Trusted Publishing (OIDC) — no API token stored as a secret.
+# Fires on a version tag (v0.1.0, v0.2.0, ...) or a manual dispatch.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # required for OIDC token exchange with PyPI
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build distributions
+        run: uv build
+
+      - name: Publish to PyPI
+        run: uv publish --trusted-publishing always

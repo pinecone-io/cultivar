@@ -1,0 +1,62 @@
+[project]
+name = "skill-eval"
+version = "0.1.0"
+description = "Eval framework for testing whether agent skills improve behavior across coding CLIs"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Pinecone", email = "support@pinecone.io" }]
+keywords = ["eval", "agent", "skill", "testing", "llm", "claude"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Testing",
+]
+requires-python = ">=3.11"
+dependencies = [
+    "pyyaml",
+    "typer",
+    "rich",
+    "anthropic",
+    "modal",
+    "python-dotenv",
+]
+
+[project.scripts]
+skill-eval = "evals.cli:app"
+
+[project.urls]
+Repository = "https://github.com/pinecone-io/skill-eval"
+Documentation = "https://github.com/pinecone-io/skill-eval/blob/main/README.md"
+
+[dependency-groups]
+test = ["pytest"]
+lint = ["ruff>=0.6", "pre-commit>=3", "ty"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["evals"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]
+
+[tool.ty.src]
+include = ["evals", "tests"]
+
+[tool.ty.environment]
+python-version = "3.11"

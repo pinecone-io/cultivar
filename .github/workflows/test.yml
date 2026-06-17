@@ -1,0 +1,25 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: uv sync --group test
+
+      - name: Run pytest
+        run: uv run pytest

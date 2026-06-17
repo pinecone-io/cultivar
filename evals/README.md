@@ -1,0 +1,125 @@
+# `evals/` — package internals
+
+This is the Python package that backs the `skill-eval` CLI. End-user docs live in [README.md](../README.md) (top-level) and the [docs/](../docs) tree. This file is a code-oriented orientation for anyone reading or editing the framework itself.
+
+If you just want to *use* skill-eval, you're in the wrong place — start with [the top-level README](../README.md) and [docs/concepts.md](../docs/concepts.md).
+
+## What's in here
+
+```
+evals/
+  cli.py                 # Typer entry point; mounts subcommands. Loads .env from cwd.
+  run.py                 # Orchestrator: run_local, run_remote, the --dry-run path
+  hello.py               # `skill-eval hello` — packaged smoke + preflight checks
+  init.py                # `skill-eval init <skill>` — scaffolds tasks/ + SKILL.md
+  show.py                # `skill-eval show <run>` — render a conversation trace
+  runners/
+    base.py              # Runner ABC + run_cli() subprocess helper
+    claude.py            # Claude Code CLI wrapper
+    copilot.py           # GitHub Copilot CLI wrapper
+    gemini.py            # Google Gemini CLI wrapper
+  framework/
+    reporting.py         # Shared rich rendering, resolve_results_dir, console
+    grader.py            # LLM grader: prompt assembly, autofail logic, calibration
+    report.py            # `skill-eval report` — reads grades.json, prints panels + summary
+  remote/
+    modal_runner.py      # Modal sandbox lifecycle (image, create, exec, terminate)
+    entry.py             # Sandbox-side: imports the real runner, prints JSON
+  _resources/smoke/      # Packaged hello-world task + skill, shipped in the wheel
+```
+
+`cli.py::app` is the Typer root. Subcommands are mounted via `app.command("init")(init_main)` etc. — each subcommand's `main` lives in its own module.
+
+## The Runner contract
+
+Every CLI wrapper subclasses `Runner` (in `runners/base.py`):
+
+```python
+class Runner(ABC):
+    name: str
+
+    @abstractmethod
+    def variants(self) -> list[str]: ...  # ["with-skill", "without-skill", "with-docs"]
+
+    @abstractmethod
+    def build_command(
+        self, intent: str, variant: str, max_turns: int = 10, docs_context: str = ""
+    ) -> tuple[list[str], str]: ...   # (argv, full_prompt) — used by --dry-run
+
+    @abstractmethod
+    def run(
+        self, intent: str, variant: str, max_turns: int = 10,
+        cwd: str | None = None, docs_context: str = "", timeout: int = 90,
+    ) -> dict: ...
+```
+
+`run()` returns a dict whose only required key is `conversation_md` (the readable trace). Optional but recommended: `raw_events`, `session_id`, `duration_ms`, `total_cost_usd`, `num_turns`, `usage`, `stderr`, `error`.
+
+The orchestrator passes `cwd` so any files the agent writes can be captured to `results/<run>/<runner>/<base>.workdir/`. The runner is responsible for forwarding `cwd` to its subprocess.
+
+To add a new runner, subclass `Runner`, register in `run.py::RUNNER_CLASSES`, and (for remote support) add to `REMOTE_RUNNERS` and ensure the CLI is installed in `remote/modal_runner.py::eval_image`. Per-runner specifics (flags, auth, quirks) live in [docs/runners/](../docs/runners/).
+
+## Local vs remote: two orchestrators, one contract
+
+Both `run_local` and `run_remote` (in `run.py`) iterate `(task × variant × repeat)` and call the same runner classes — the difference is where the subprocess lives.
+
+**Local (`run_local`):**
+- Each iteration runs in a fresh `tempfile.TemporaryDirectory()` as the agent's cwd.
+- For `with-skill`, the skill is copied into `<tmpdir>/.claude/skills/<name>/` before the runner is called, so Claude Code / Copilot can discover it via walk-up.
+- After the runner returns, non-noise contents of the tmpdir get copied to `<runner>/<base>.workdir/`.
+
+**Remote (`run_remote`):**
+- Each iteration submits a `run_one_remote()` call to a `ThreadPoolExecutor` (max workers = `--parallel`, default 5).
+- `modal_runner.py` creates a fresh `modal.Sandbox` per iteration with the image, the secret named by `SKILL_EVAL_MODAL_SECRET` (default: `eval-sandbox-secrets`), and a `+60s` buffer on top of the agent's `--timeout`.
+- For `with-skill`, the skill is mounted into the image at `/workspace/.claude/skills/<name>/`; the agent's cwd is `/workspace/app/`.
+- `entry.py` runs inside the sandbox, imports the same `Runner` class, calls `.run()`, prints JSON to stdout. The orchestrator parses that and pulls workdir files out via per-file `sb.open(..., "rb").read()`.
+
+The whole point of `entry.py` is to avoid a reimplementation: identical runner output local and remote.
+
+See [docs/sandbox.md](../docs/sandbox.md) for the full lifecycle, image contents, and DIY workspace setup.
+
+## The grader
+
+`framework/grader.py` runs **locally only** (never inside the sandbox — keeps the Anthropic key on the user's machine). For each conversation in a run dir, it:
+
+1. Builds a prompt from: skill SKILL.md + task criteria + `context_refs` reference material + calibration examples + the conversation + verify output + any workdir files.
+2. Sends to Claude Haiku (or `--model`).
+3. Parses the JSON response into a grade `{pass, evidence, reasoning, suggestions, ...}`.
+
+Two pre-API short-circuits to avoid hallucinated grades:
+- Empty/no-signal conversation → autofail before the call.
+- `category: code-gen` with an empty workdir → autofail before the call.
+
+If the model truncates its JSON mid-evidence, `_salvage_truncated_grade()` regex-extracts the verdict so a real PASS doesn't become a fake FAIL. `GRADER_MAX_TOKENS = 4096`.
+
+Full prompt anatomy + calibration mechanics: [docs/grader.md](../docs/grader.md).
+
+## Variants
+
+Three of them: `with-skill`, `without-skill`, `with-docs`. The third auto-activates when a task declares `ground_truth.context_refs: [...]`; otherwise it's skipped. The same `context_refs` files are used in *two* places — the grader prompt (as authoritative reference) and the with-docs runner prompt (prepended to the intent). See [docs/concepts.md#the-controls-with-skill-without-skill-with-docs](../docs/concepts.md#the-controls-with-skill-without-skill-with-docs) and [docs/task-yaml.md#variants](../docs/task-yaml.md#variants).
+
+## Path resolution
+
+User-data paths (`tasks/`, `examples/`, `results/`, `.claude/skills/`) are **cwd-relative**, not package-relative. Defined as module-level constants in `run.py` and `framework/grader.py` so `skill-eval` installed globally resolves them from wherever it's invoked. Don't reintroduce `Path(__file__).parent`-based defaults for user data — this design is what makes the tool work from a skills repo without ever cloning this one.
+
+## Test layout
+
+`tests/test_core.py` covers loaders, env validation, save_result, grader prompt construction + autofail short-circuits, calibration filtering, workdir filtering, packaged smoke resources, and orchestrator call-surface guards (AST-based check that `hello.py`'s calls to `run_local`/`run_remote` still match their signatures — the bug class that hit us once).
+
+```bash
+uv run pytest -q       # ~0.4s
+uv run ruff check .    # lint
+uv run ty check        # types
+```
+
+## Source-of-truth pointers
+
+| Topic | File |
+|---|---|
+| How to write a task YAML | [docs/task-yaml.md](../docs/task-yaml.md) |
+| What the framework measures + why | [docs/concepts.md](../docs/concepts.md) |
+| Grader prompt anatomy + calibration | [docs/grader.md](../docs/grader.md) |
+| Modal sandbox setup + lifecycle | [docs/sandbox.md](../docs/sandbox.md) |
+| Per-runner flag/auth/quirk details | [docs/runners/](../docs/runners/) |
+| End-user CLI usage | [README.md](../README.md), `skill-eval <cmd> --help` |
+| Contributing | [CONTRIBUTING.md](../CONTRIBUTING.md) |

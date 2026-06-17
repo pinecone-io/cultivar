@@ -1,0 +1,21 @@
+tasks:
+  - id: hello-py
+    intent: "Write a file named hello.py in the current directory that prints 'hello world' when run. Do not run it; just write the file."
+    ground_truth:
+      criteria: |
+        PASS requires a file named hello.py in the captured workdir that prints
+        'hello world' when executed.
+
+        Acceptable:
+        - print("hello world") or print('hello world')
+        - Any case ("Hello World", "HELLO WORLD", etc.)
+        - Leading/trailing whitespace is fine
+
+        FAIL if:
+        - No hello.py file was written
+        - hello.py doesn't contain a print of the expected string
+        - The file is named something else (hello_world.py, main.py, etc.)
+
+        This is a smoke test for the workdir-capture mechanism, not a skill test.
+        Both variants should generally PASS — any skill or baseline agent can do this.
+    category: code-gen
