@@ -1,4 +1,4 @@
-"""`skill-eval hello` — end-to-end smoke test using a packaged task + skill.
+"""`cultivar hello` — end-to-end smoke test using a packaged task + skill.
 
 Exists so a fresh `uv tool install` can be verified in one command without
 cloning this repo: the smoke YAML and SKILL.md ship inside the wheel.
@@ -52,7 +52,7 @@ def _preflight(runner: str, grade: bool, remote: bool) -> list[dict]:
     """Aggregate setup checks. Each row is {name, ok, detail, hint}.
 
     Pure: only reads filesystem (shutil.which, ~/.modal.toml) and os.environ —
-    no network, no subprocess. Lets `skill-eval hello` give a doctor-style
+    no network, no subprocess. Lets `cultivar hello` give a doctor-style
     summary before the smoke runs.
     """
     rows: list[dict] = []
@@ -145,7 +145,7 @@ def main(
     ),
     max_turns: int = typer.Option(6, "--max-turns", help="Max agentic turns for the smoke."),
 ):
-    """End-to-end smoke test of a fresh skill-eval install (no clone required).
+    """End-to-end smoke test of a fresh cultivar install (no clone required).
 
     Runs a tiny packaged task ("write hello.py") against the chosen runner,
     then grades the result. Verifies that runner CLI auth, workdir capture,
@@ -153,10 +153,10 @@ def main(
     are all wired up. Exits 0 on PASS, non-zero on FAIL.
 
     Examples:
-      skill-eval hello                              # claude, local, with-skill, graded
-      skill-eval hello --runner claude --remote     # confirm Modal + secret are set up
-      skill-eval hello --no-grade                   # skip grading (no ANTHROPIC_API_KEY)
-      skill-eval hello -v ""                        # both smoke variants: with-skill + without-skill (slower)
+      cultivar hello                              # claude, local, with-skill, graded
+      cultivar hello --runner claude --remote     # confirm Modal + secret are set up
+      cultivar hello --no-grade                   # skip grading (no ANTHROPIC_API_KEY)
+      cultivar hello -v ""                        # both smoke variants: with-skill + without-skill (slower)
     """
     runner_cls = RUNNER_CLASSES.get(runner)
     if not runner_cls:
@@ -172,7 +172,7 @@ def main(
             console.print(f"  • [bold]{r['name']}[/bold] — {r['hint'] or r['detail']}")
         raise typer.Exit(2)
 
-    smoke_root = Path(tempfile.mkdtemp(prefix="skill-eval-hello-"))
+    smoke_root = Path(tempfile.mkdtemp(prefix="cultivar-hello-"))
     try:
         tasks, skill_dir = _materialize_smoke(smoke_root)
 
@@ -192,7 +192,7 @@ def main(
         with open(run_dir / "tasks.json", "w") as f:
             json.dump({"skill": SMOKE_SKILL_NAME, "tasks": tasks}, f, indent=2)
 
-        console.print(f"[bold]skill-eval hello[/bold]  runner={runner}  variant={','.join(variants)}  remote={remote}")
+        console.print(f"[bold]cultivar hello[/bold]  runner={runner}  variant={','.join(variants)}  remote={remote}")
         console.print(f"  results: {run_dir}")
 
         if remote:
@@ -209,7 +209,7 @@ def main(
 
         if not grade:
             console.print("\n[green]Smoke run complete.[/green] (skipped grading)")
-            console.print(f"Inspect: skill-eval report {run_dir}")
+            console.print(f"Inspect: cultivar report {run_dir}")
             return
 
         console.print("\nGrading...")
@@ -245,9 +245,9 @@ def main(
             )
             console.print(
                 "\n[bold]Next:[/bold] scaffold a skill of your own —\n"
-                "  [bold]skill-eval init <your-skill-name>[/bold]\n"
+                "  [bold]cultivar init <your-skill-name>[/bold]\n"
                 "Then edit [dim]tasks/<your-skill-name>.yaml[/dim] and run "
-                "[bold]skill-eval run -s <your-skill-name> -r claude --grade[/bold]."
+                "[bold]cultivar run -s <your-skill-name> -r claude --grade[/bold]."
             )
             return
         failed = [g for g in grades if not g.get("pass")]

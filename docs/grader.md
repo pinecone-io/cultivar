@@ -4,9 +4,9 @@ LLM-based grader that scores runner conversations against natural-language crite
 
 ## When it runs
 
-- `skill-eval run … --grade` — runs grader after the runs finish
-- `skill-eval grade <results-dir> --report` — re-grades an existing run (e.g. after editing criteria or adding examples)
-- `skill-eval grade latest` — most-recent run
+- `cultivar run … --grade` — runs grader after the runs finish
+- `cultivar grade <results-dir> --report` — re-grades an existing run (e.g. after editing criteria or adding examples)
+- `cultivar grade latest` — most-recent run
 
 ## Required env
 
@@ -83,11 +83,11 @@ reasoning: |
 }
 ```
 
-`suggestions` is empty `[]` on clean passes. On failures it carries 1–3 `{cause, fix}` entries the grader thinks are probable root causes + concrete next steps; `skill-eval report` and `skill-eval show … --grader` render them as a yellow `cause → fix` bullet list. Plus `sandbox_timing` (create/setup/eval/teardown phase splits) when run remotely.
+`suggestions` is empty `[]` on clean passes. On failures it carries 1–3 `{cause, fix}` entries the grader thinks are probable root causes + concrete next steps; `cultivar report` and `cultivar show … --grader` render them as a yellow `cause → fix` bullet list. Plus `sandbox_timing` (create/setup/eval/teardown phase splits) when run remotely.
 
 ## Re-grading
 
-`skill-eval grade latest --report` re-grades without re-running the agents. Use this loop when iterating on `criteria` or adding calibration examples — it's cheap (one Haiku call per task) and fast.
+`cultivar grade latest --report` re-grades without re-running the agents. Use this loop when iterating on `criteria` or adding calibration examples — it's cheap (one Haiku call per task) and fast.
 
 ## Sources
 

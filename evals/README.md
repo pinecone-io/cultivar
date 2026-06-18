@@ -1,8 +1,8 @@
 # `evals/` — package internals
 
-This is the Python package that backs the `skill-eval` CLI. End-user docs live in [README.md](../README.md) (top-level) and the [docs/](../docs) tree. This file is a code-oriented orientation for anyone reading or editing the framework itself.
+This is the Python package that backs the `cultivar` CLI. End-user docs live in [README.md](../README.md) (top-level) and the [docs/](../docs) tree. This file is a code-oriented orientation for anyone reading or editing the framework itself.
 
-If you just want to *use* skill-eval, you're in the wrong place — start with [the top-level README](../README.md) and [docs/concepts.md](../docs/concepts.md).
+If you just want to *use* cultivar, you're in the wrong place — start with [the top-level README](../README.md) and [docs/concepts.md](../docs/concepts.md).
 
 ## What's in here
 
@@ -10,9 +10,9 @@ If you just want to *use* skill-eval, you're in the wrong place — start with [
 evals/
   cli.py                 # Typer entry point; mounts subcommands. Loads .env from cwd.
   run.py                 # Orchestrator: run_local, run_remote, the --dry-run path
-  hello.py               # `skill-eval hello` — packaged smoke + preflight checks
-  init.py                # `skill-eval init <skill>` — scaffolds tasks/ + SKILL.md
-  show.py                # `skill-eval show <run>` — render a conversation trace
+  hello.py               # `cultivar hello` — packaged smoke + preflight checks
+  init.py                # `cultivar init <skill>` — scaffolds tasks/ + SKILL.md
+  show.py                # `cultivar show <run>` — render a conversation trace
   runners/
     base.py              # Runner ABC + run_cli() subprocess helper
     claude.py            # Claude Code CLI wrapper
@@ -21,7 +21,7 @@ evals/
   framework/
     reporting.py         # Shared rich rendering, resolve_results_dir, console
     grader.py            # LLM grader: prompt assembly, autofail logic, calibration
-    report.py            # `skill-eval report` — reads grades.json, prints panels + summary
+    report.py            # `cultivar report` — reads grades.json, prints panels + summary
   remote/
     modal_runner.py      # Modal sandbox lifecycle (image, create, exec, terminate)
     entry.py             # Sandbox-side: imports the real runner, prints JSON
@@ -70,7 +70,7 @@ Both `run_local` and `run_remote` (in `run.py`) iterate `(task × variant × rep
 
 **Remote (`run_remote`):**
 - Each iteration submits a `run_one_remote()` call to a `ThreadPoolExecutor` (max workers = `--parallel`, default 5).
-- `modal_runner.py` creates a fresh `modal.Sandbox` per iteration with the image, the secret named by `SKILL_EVAL_MODAL_SECRET` (default: `eval-sandbox-secrets`), and a `+60s` buffer on top of the agent's `--timeout`.
+- `modal_runner.py` creates a fresh `modal.Sandbox` per iteration with the image, the secret named by `CULTIVAR_MODAL_SECRET` (default: `eval-sandbox-secrets`), and a `+60s` buffer on top of the agent's `--timeout`.
 - For `with-skill`, the skill is mounted into the image at `/workspace/.claude/skills/<name>/`; the agent's cwd is `/workspace/app/`.
 - `entry.py` runs inside the sandbox, imports the same `Runner` class, calls `.run()`, prints JSON to stdout. The orchestrator parses that and pulls workdir files out via per-file `sb.open(..., "rb").read()`.
 
@@ -100,7 +100,7 @@ Three of them: `with-skill`, `without-skill`, `with-docs`. The third auto-activa
 
 ## Path resolution
 
-User-data paths (`tasks/`, `examples/`, `results/`, `.claude/skills/`) are **cwd-relative**, not package-relative. Defined as module-level constants in `run.py` and `framework/grader.py` so `skill-eval` installed globally resolves them from wherever it's invoked. Don't reintroduce `Path(__file__).parent`-based defaults for user data — this design is what makes the tool work from a skills repo without ever cloning this one.
+User-data paths (`tasks/`, `examples/`, `results/`, `.claude/skills/`) are **cwd-relative**, not package-relative. Defined as module-level constants in `run.py` and `framework/grader.py` so `cultivar` installed globally resolves them from wherever it's invoked. Don't reintroduce `Path(__file__).parent`-based defaults for user data — this design is what makes the tool work from a skills repo without ever cloning this one.
 
 ## Test layout
 
@@ -121,5 +121,5 @@ uv run ty check        # types
 | Grader prompt anatomy + calibration | [docs/grader.md](../docs/grader.md) |
 | Modal sandbox setup + lifecycle | [docs/sandbox.md](../docs/sandbox.md) |
 | Per-runner flag/auth/quirk details | [docs/runners/](../docs/runners/) |
-| End-user CLI usage | [README.md](../README.md), `skill-eval <cmd> --help` |
+| End-user CLI usage | [README.md](../README.md), `cultivar <cmd> --help` |
 | Contributing | [CONTRIBUTING.md](../CONTRIBUTING.md) |

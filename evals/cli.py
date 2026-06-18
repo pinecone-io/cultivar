@@ -1,4 +1,4 @@
-"""Entry point for the skill-eval CLI."""
+"""Entry point for the cultivar CLI."""
 
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -22,10 +22,10 @@ from evals.show import main as show_main  # noqa: E402
 def _version_callback(value: bool) -> None:
     if value:
         try:
-            v = version("skill-eval")
+            v = version("cultivar")
         except PackageNotFoundError:
             v = "unknown (not installed as a package)"
-        typer.echo(f"skill-eval {v}")
+        typer.echo(f"cultivar {v}")
         raise typer.Exit()
 
 
@@ -42,7 +42,7 @@ app = typer.Typer(
     ),
     no_args_is_help=True,
     pretty_exceptions_enable=False,
-    epilog="Run 'skill-eval <command> --help' for details on a specific subcommand.",
+    epilog="Run 'cultivar <command> --help' for details on a specific subcommand.",
 )
 
 
@@ -52,7 +52,7 @@ def _root(
         False,
         "--version",
         "-V",
-        help="Print the installed skill-eval version and exit.",
+        help="Print the installed cultivar version and exit.",
         callback=_version_callback,
         is_eager=True,
     ),

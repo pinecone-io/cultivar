@@ -14,8 +14,8 @@ import modal
 
 # Name of the Modal secret mounted into each sandbox. Override with env var
 # to use a different secret name without patching the source.
-SECRET_NAME = os.environ.get("SKILL_EVAL_MODAL_SECRET", "eval-sandbox-secrets")
-_MODAL_APP_NAME = os.environ.get("SKILL_EVAL_MODAL_APP", "skill-evals")
+SECRET_NAME = os.environ.get("CULTIVAR_MODAL_SECRET", "eval-sandbox-secrets")
+_MODAL_APP_NAME = os.environ.get("CULTIVAR_MODAL_APP", "cultivar")
 
 EVALS_DIR = Path(__file__).parent.parent
 

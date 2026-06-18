@@ -367,12 +367,12 @@ class TestLoadWorkdirFiles:
 
 
 # ---------------------------------------------------------------------------
-# 7. Packaged smoke (skill-eval hello) — must be locatable via importlib
+# 7. Packaged smoke (cultivar hello) — must be locatable via importlib
 # ---------------------------------------------------------------------------
 
 
 class TestPackagedSmoke:
-    """`skill-eval hello` reads the smoke from package data; if it's missing
+    """`cultivar hello` reads the smoke from package data; if it's missing
     from the wheel, a fresh `uv tool install` can't smoke-test itself."""
 
     def test_smoke_resources_locatable(self):
@@ -553,7 +553,7 @@ class TestRemediationSuggestions:
 
 
 # ---------------------------------------------------------------------------
-# 10. skill-eval hello preflight — doctor-style setup verification
+# 10. cultivar hello preflight — doctor-style setup verification
 # ---------------------------------------------------------------------------
 
 
@@ -631,7 +631,7 @@ class TestHelloPreflight:
 
 
 # ---------------------------------------------------------------------------
-# 10. skill-eval show — selector parsing + run discovery
+# 10. cultivar show — selector parsing + run discovery
 # ---------------------------------------------------------------------------
 
 
@@ -1068,7 +1068,7 @@ class TestOrchestratorCallSurface:
                 ) from None
 
     def test_dry_run_smoke(self, monkeypatch, tmp_path):
-        """`skill-eval run -s workdir-smoke --dry-run` exits 0 and prints the prompt.
+        """`cultivar run -s workdir-smoke --dry-run` exits 0 and prints the prompt.
 
         Exercises the Typer wiring + load_tasks + build_command path without
         touching any CLI subprocess. Run from the package root so the bundled
@@ -1078,7 +1078,7 @@ class TestOrchestratorCallSurface:
 
         from evals.cli import app
 
-        # `skill-eval run` resolves tasks/<skill>.yaml and .claude/skills/<skill>/
+        # `cultivar run` resolves tasks/<skill>.yaml and .claude/skills/<skill>/
         # relative to cwd. The committed workdir-smoke fixtures live at the repo
         # root, so chdir there for the duration of the test.
         repo_root = Path(__file__).parent.parent

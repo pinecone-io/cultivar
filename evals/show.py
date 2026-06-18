@@ -1,4 +1,4 @@
-"""`skill-eval show` — readable, pipe-friendly inspector for one run.
+"""`cultivar show` — readable, pipe-friendly inspector for one run.
 
 Walks a results dir, filters by runner/task/variant, and prints conversation +
 metadata + grader output for a single run. Used both by humans (instead of jq +
@@ -319,7 +319,7 @@ def _render(run: dict, grade: dict | None, mode: str) -> None:
 
     if mode == "grader":
         if grade is None:
-            console.print("[yellow]No grader entry found. Run `skill-eval grade <run>` first.[/yellow]")
+            console.print("[yellow]No grader entry found. Run `cultivar grade <run>` first.[/yellow]")
             return
         _print_grader(grade)
         return
@@ -361,13 +361,13 @@ def _render(run: dict, grade: dict | None, mode: str) -> None:
     if grade is not None:
         _print_grader(grade)
     else:
-        console.print("[dim]## Grader[/dim]\n[dim](not graded yet — run `skill-eval grade <run>`)[/dim]\n")
+        console.print("[dim]## Grader[/dim]\n[dim](not graded yet — run `cultivar grade <run>`)[/dim]\n")
 
     label = "pass" if grade and grade.get("pass") else "fail"
     selector = f"-r {run['runner']} -t {run['task_id']} -v {run['variant']}"
     console.print(
         f"[dim]Promote this run to a calibration example:[/dim]\n"
-        f'  skill-eval examples add {selector} --label {label} --reason "..."'
+        f'  cultivar examples add {selector} --label {label} --reason "..."'
     )
 
 
@@ -392,10 +392,10 @@ def main(
     multi-task run, prints a brief listing instead of a wall of conversations.
 
     Examples:
-      skill-eval show latest -r claude -t hello-py     # one run, full view
-      skill-eval show latest -t hello-py --grader      # just the grader notes
-      skill-eval show latest -r claude --events        # raw .jsonl stream
-      skill-eval show latest -t hello-py --workdir     # workdir file listing
+      cultivar show latest -r claude -t hello-py     # one run, full view
+      cultivar show latest -t hello-py --grader      # just the grader notes
+      cultivar show latest -r claude --events        # raw .jsonl stream
+      cultivar show latest -t hello-py --workdir     # workdir file listing
     """
     modes = [conversation_only, events, grader, workdir]
     if sum(bool(m) for m in modes) > 1:

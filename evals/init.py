@@ -1,4 +1,4 @@
-"""`skill-eval init <skill>` — scaffold a tasks/<skill>.yaml and optional SKILL.md."""
+"""`cultivar init <skill>` — scaffold a tasks/<skill>.yaml and optional SKILL.md."""
 
 from pathlib import Path
 
@@ -10,7 +10,7 @@ app = typer.Typer(pretty_exceptions_enable=False)
 
 TASK_TEMPLATE = """\
 # Tasks for the "{skill}" skill. One YAML per skill.
-# Full schema + every field: docs/task-yaml.md (https://github.com/pinecone-io/skill-eval/blob/main/docs/task-yaml.md)
+# Full schema + every field: docs/task-yaml.md (https://github.com/pinecone-io/cultivar/blob/main/docs/task-yaml.md)
 
 tasks:
   # Example 1 — CLI-style task: agent runs a shell command, grader checks the conversation.
@@ -58,7 +58,7 @@ tasks:
   # Paths are cwd-relative or absolute. Combined cap: 100 KB. URLs not yet
   # supported — `curl https://... > docs/refs/source.md` first.
   - id: example-task-with-context-refs
-    intent: "do the thing per our internal best-practices doc"
+    intent: "do the thing per your team's best-practices doc"
     ground_truth:
       criteria: |
         PASS requires the agent to follow the patterns spelled out in
@@ -103,9 +103,9 @@ def main(
     run this from the repo where you want the skill to live.
 
     Examples:
-      skill-eval init my-skill                # scaffold both files
-      skill-eval init my-skill --no-skill-md  # only the task YAML; reuse an existing skill
-      skill-eval init my-skill --force        # overwrite an existing tasks file
+      cultivar init my-skill                # scaffold both files
+      cultivar init my-skill --no-skill-md  # only the task YAML; reuse an existing skill
+      cultivar init my-skill --force        # overwrite an existing tasks file
 
     See docs/task-yaml.md for the full task schema and docs/concepts.md for the
     with-skill / without-skill / with-docs variant breakdown.
@@ -142,7 +142,7 @@ def main(
 
     if created:
         console.print(
-            f"\nNext: edit the tasks file and run [bold]skill-eval run --skill {skill} --runner claude[/bold]"
+            f"\nNext: edit the tasks file and run [bold]cultivar run --skill {skill} --runner claude[/bold]"
         )
 
 

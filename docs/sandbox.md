@@ -1,6 +1,6 @@
 # Sandbox (Modal) — DIY guide
 
-`skill-eval run --remote` executes each (task, variant, repeat) in its own [Modal](https://modal.com) sandbox: isolated filesystem, no auth-state collisions across parallel runs, billed per-second of execution.
+`cultivar run --remote` executes each (task, variant, repeat) in its own [Modal](https://modal.com) sandbox: isolated filesystem, no auth-state collisions across parallel runs, billed per-second of execution.
 
 ## Image
 
@@ -27,7 +27,7 @@ Per (task, variant, repeat), one sandbox:
 | **teardown** | `task.teardown` shell command, if defined | `*.teardown.log` |
 | **terminate** | `sb.terminate()` (in `finally`) | always runs |
 
-Each phase is timed; per-phase splits live in `result["sandbox_timing"]` and show in `skill-eval report`.
+Each phase is timed; per-phase splits live in `result["sandbox_timing"]` and show in `cultivar report`.
 
 ## Hard timeout
 
@@ -40,8 +40,8 @@ Set with `--timeout <seconds>` (default `90`). That value is the **agent CLI bud
 | Skill mounted | `--skill <name>`, `--skills-dir <path>` |
 | Setup / verify / teardown | per-task in YAML (run inside the sandbox) |
 | Required env vars (preflight, locally) | per-task `env: [...]` |
-| Sandbox env / secrets | a Modal secret named `eval-sandbox-secrets` by default; override with `SKILL_EVAL_MODAL_SECRET` env var |
-| Modal app name | `skill-evals` by default; override with `SKILL_EVAL_MODAL_APP` env var |
+| Sandbox env / secrets | a Modal secret named `eval-sandbox-secrets` by default; override with `CULTIVAR_MODAL_SECRET` env var |
+| Modal app name | `cultivar` by default; override with `CULTIVAR_MODAL_APP` env var |
 | Parallelism | `--parallel N` (default 5) |
 | Repeats | `--repeat N` |
 | Per-call timeout | `--timeout <seconds>` (default 90; sandbox gets +60s buffer) |
@@ -69,10 +69,10 @@ modal secret list   # eval-sandbox-secrets should appear
 modal token current # should show your username + workspace
 
 # 4. First remote run (image builds; takes ~3–5 min)
-skill-eval run --skill workdir-smoke --runner claude --remote
+cultivar run --skill workdir-smoke --runner claude --remote
 ```
 
-The secret is **named** `eval-sandbox-secrets` by default. To use a different name (e.g. when sharing the tool across orgs), set `SKILL_EVAL_MODAL_SECRET=my-secret-name` in your environment — `modal_runner.py` reads it on import.
+The secret is **named** `eval-sandbox-secrets` by default. To use a different name (e.g. when sharing the tool across orgs), set `CULTIVAR_MODAL_SECRET=my-secret-name` in your environment — `modal_runner.py` reads it on import.
 
 If you belong to multiple Modal workspaces, switch with `modal profile activate <name>` or set `MODAL_PROFILE` for a single command.
 

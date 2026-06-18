@@ -1,6 +1,6 @@
 # Task YAML reference
 
-A skill's tasks live in `tasks/<skill>.yaml` (cwd-relative). One file per skill, one or more tasks per file. `skill-eval init <skill>` scaffolds a starter file.
+A skill's tasks live in `tasks/<skill>.yaml` (cwd-relative). One file per skill, one or more tasks per file. `cultivar init <skill>` scaffolds a starter file.
 
 ## Top-level shape
 
@@ -95,18 +95,18 @@ The agent runs in a per-task tempdir; anything it writes is captured to `results
 <cwd>/tasks/<skill>.yaml
 ```
 
-The path is **cwd-relative**, not package-relative. `skill-eval` resolves it from wherever you invoke it. Same for `examples/`, `results/`, `.claude/skills/`.
+The path is **cwd-relative**, not package-relative. `cultivar` resolves it from wherever you invoke it. Same for `examples/`, `results/`, `.claude/skills/`.
 
-The framework repo's own `tasks/workdir-smoke.yaml` is the only committed task — all other `tasks/` content is gitignored (skill-specific, owned by your skills repo). The same smoke also ships inside the wheel as package data so `skill-eval hello` works post-install without a clone (see [README.md](../README.md#smoke-test-post-install-no-clone)).
+The framework repo's own `tasks/workdir-smoke.yaml` is the only committed task — all other `tasks/` content is gitignored (skill-specific, owned by your skills repo). The same smoke also ships inside the wheel as package data so `cultivar hello` works post-install without a clone (see [README.md](../README.md#smoke-test-post-install-no-clone)).
 
 ## Filtering
 
 ```bash
-skill-eval run --skill my-skill --task my-task          # single task
-skill-eval run --skill my-skill --category cli          # all in a category
-skill-eval run --skill my-skill --variant with-skill    # single variant only
-skill-eval run --skill my-skill --variant with-docs     # only tasks with context_refs run
-skill-eval run --skill my-skill --task my-task --dry-run # preview the prompt + command + criteria
+cultivar run --skill my-skill --task my-task          # single task
+cultivar run --skill my-skill --category cli          # all in a category
+cultivar run --skill my-skill --variant with-skill    # single variant only
+cultivar run --skill my-skill --variant with-docs     # only tasks with context_refs run
+cultivar run --skill my-skill --task my-task --dry-run # preview the prompt + command + criteria
 ```
 
 ## Variants
@@ -160,5 +160,5 @@ These are tracked but not implemented:
 ## Sources
 
 - [evals/run.py](../evals/run.py) — `load_tasks` (loader + `--task` / `--category` filters), `validate_env_vars` (env preflight), `run_local` / `run_remote` (setup/verify/teardown wiring)
-- [evals/init.py](../evals/init.py) — `skill-eval init <skill>` scaffolding template (CLI-style + code-gen examples)
+- [evals/init.py](../evals/init.py) — `cultivar init <skill>` scaffolding template (CLI-style + code-gen examples)
 - [tasks/workdir-smoke.yaml](../tasks/workdir-smoke.yaml) — committed smoke task; useful as a worked example

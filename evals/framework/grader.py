@@ -477,10 +477,9 @@ def _salvage_truncated_grade(text: str) -> dict:
     The verdict (`pass: true/false`) is almost always the first key the model
     emits, so a truncated response usually still has a recoverable PASS/FAIL
     signal even when the trailing `evidence` / `reasoning` strings are cut off
-    mid-quote. Without this salvage, a real PASS becomes a fake FAIL — the
-    onboard-corpus 4/30 incident where `"pass": true` was the very first key
-    but the framework dropped the verdict because of an unclosed `evidence`
-    string.
+    mid-quote. Without this salvage, a real PASS becomes a fake FAIL — we hit
+    exactly that in practice, where `"pass": true` was the very first key but
+    the framework dropped the verdict because of an unclosed `evidence` string.
     """
     pass_match = re.search(r'"pass"\s*:\s*"?(true|false)"?', text, re.I)
     cmd_match = re.search(r'"proposed_command"\s*:\s*"((?:[^"\\]|\\.)*)"', text)
@@ -549,10 +548,10 @@ def main(
     ANTHROPIC_API_KEY (auto-loaded from .env in cwd).
 
     Examples:
-      skill-eval grade latest                                  # regrade the most recent run
-      skill-eval grade results/2026-04-22T11-31-47__baseline   # grade a specific run
-      skill-eval grade latest --model claude-sonnet-4-6        # use a stronger grader
-      skill-eval grade latest --no-report                      # write grades.json, skip the report
+      cultivar grade latest                                  # regrade the most recent run
+      cultivar grade results/2026-04-22T11-31-47__baseline   # grade a specific run
+      cultivar grade latest --model claude-sonnet-4-6        # use a stronger grader
+      cultivar grade latest --no-report                      # write grades.json, skip the report
 
     See docs/grader.md for prompt structure and calibration tips.
     """

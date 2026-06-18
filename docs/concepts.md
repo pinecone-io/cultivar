@@ -1,6 +1,6 @@
 # Concepts
 
-A 5-minute read for someone new to skill-eval. Read this before the per-area docs.
+A 5-minute read for someone new to cultivar. Read this before the per-area docs.
 
 ## The question this framework answers
 
@@ -8,7 +8,7 @@ A 5-minute read for someone new to skill-eval. Read this before the per-area doc
 
 You write a skill (a markdown file with patterns, commands, examples). You hand it to an agent. The agent does *something* — and you want to know whether that something is better than what the agent would have done without the skill.
 
-Skill-eval automates that comparison.
+cultivar automates that comparison.
 
 ## The unit of measurement: a task
 
@@ -23,7 +23,7 @@ A **task** is a small, self-contained jobs the agent is asked to do, plus a desc
       FAIL if it uses the SDK directly or invents indexes.
 ```
 
-The agent runs the task. Skill-eval saves the conversation. An LLM grader reads the conversation against the criteria and returns `{pass, evidence, reasoning}`.
+The agent runs the task. cultivar saves the conversation. An LLM grader reads the conversation against the criteria and returns `{pass, evidence, reasoning}`.
 
 That's the atom. Everything else is composition: many tasks per skill, many runs per task, many runners.
 
@@ -81,7 +81,7 @@ This lets you see whether your skill helps *all* agents or just one. A skill tha
 
 ## Local vs remote (Modal sandboxes)
 
-- **Local:** `skill-eval run --skill X --runner claude` — uses your local CLI install, your auth, your filesystem. Fast for one-offs.
+- **Local:** `cultivar run --skill X --runner claude` — uses your local CLI install, your auth, your filesystem. Fast for one-offs.
 - **Remote:** `... --remote` — each (task, variant, repeat) runs in its own [Modal](https://modal.com) sandbox. Isolated filesystem, no auth-state collisions, parallel by default. Recommended for anything beyond a quick check.
 
 See [docs/sandbox.md](sandbox.md).
@@ -98,12 +98,12 @@ LLMs are noisy. One run isn't a signal — it's a sample. Use `--repeat N` to ru
 
 ## Typical workflow
 
-1. **Verify the install** (`skill-eval hello` → runs a packaged smoke task; confirms runner CLI auth, workdir capture, and grader work end-to-end).
+1. **Verify the install** (`cultivar hello` → runs a packaged smoke task; confirms runner CLI auth, workdir capture, and grader work end-to-end).
 2. **Write the skill** (`SKILL.md` under `.claude/skills/<skill>/`).
-3. **Scaffold tasks** (`skill-eval init <skill>` → edit `tasks/<skill>.yaml`).
-4. **Dry-run** (`skill-eval run -s <skill> -t <task> --dry-run`) to see exactly what the agent will be asked.
-5. **Run + grade** (`skill-eval run -s <skill> -r claude --remote --grade`).
-6. **Inspect** (`skill-eval report`, `skill-eval show <run>`).
+3. **Scaffold tasks** (`cultivar init <skill>` → edit `tasks/<skill>.yaml`).
+4. **Dry-run** (`cultivar run -s <skill> -t <task> --dry-run`) to see exactly what the agent will be asked.
+5. **Run + grade** (`cultivar run -s <skill> -r claude --remote --grade`).
+6. **Inspect** (`cultivar report`, `cultivar show <run>`).
 7. **Calibrate** when the grader misjudges — add labeled examples to `examples/<skill>/{pass,fail}/`.
 8. **Iterate on the skill**, rerun, compare.
 

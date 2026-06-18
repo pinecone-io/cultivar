@@ -437,11 +437,11 @@ def main(
     in its own Modal sandbox. Results go to ./results/<timestamp>[__title]/.
 
     Examples:
-      skill-eval run -s my-skill -t my-task --dry-run            # preview prompt + command + criteria
-      skill-eval run -s my-skill -r claude --remote --grade      # run + grade + report in one shot
-      skill-eval run -s my-skill -r claude --remote -n 3 -p 5    # 3 repeats, 5 sandboxes in parallel
-      skill-eval run -s my-skill -r claude --remote --title v2   # name a run for later comparison
-      skill-eval run -s my-skill -r claude --timeout 180         # raise per-call budget to 180s (default 90)
+      cultivar run -s my-skill -t my-task --dry-run            # preview prompt + command + criteria
+      cultivar run -s my-skill -r claude --remote --grade      # run + grade + report in one shot
+      cultivar run -s my-skill -r claude --remote -n 3 -p 5    # 3 repeats, 5 sandboxes in parallel
+      cultivar run -s my-skill -r claude --remote --title v2   # name a run for later comparison
+      cultivar run -s my-skill -r claude --timeout 180         # raise per-call budget to 180s (default 90)
 
     See docs/task-yaml.md for the task schema and docs/sandbox.md for --remote setup.
     """
@@ -559,7 +559,7 @@ def main(
         )
     else:
         typer.echo("\nTo grade and view report:")
-        typer.echo(f"  skill-eval grade {run_dir} --report")
+        typer.echo(f"  cultivar grade {run_dir} --report")
 
 
 if __name__ == "__main__":

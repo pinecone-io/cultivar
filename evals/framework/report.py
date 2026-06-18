@@ -15,14 +15,14 @@ def main(
 ):
     """Print a report from a graded results dir (no grading, no API calls).
 
-    Reads <results_dir>/grades.json (written by `skill-eval grade`) and renders
+    Reads <results_dir>/grades.json (written by `cultivar grade`) and renders
     a per-task / per-runner / per-variant panel plus a summary table. FAIL
     panels include grader-supplied remediation suggestions (cause → fix) when
-    present. For a deeper view of one run, use `skill-eval show`.
+    present. For a deeper view of one run, use `cultivar show`.
 
     Examples:
-      skill-eval report                                        # latest run
-      skill-eval report results/2026-04-22T11-31-47__baseline  # specific run
+      cultivar report                                        # latest run
+      cultivar report results/2026-04-22T11-31-47__baseline  # specific run
     """
     results_path = resolve_results_dir(results_dir)
     grades_file = results_path / "grades.json"

@@ -1,5 +1,5 @@
 [project]
-name = "skill-eval"
+name = "cultivar"
 version = "0.1.0"
 description = "Eval framework for testing whether agent skills improve behavior across coding CLIs"
 readme = "README.md"
@@ -24,11 +24,11 @@ dependencies = [
 ]
 
 [project.scripts]
-skill-eval = "evals.cli:app"
+cultivar = "evals.cli:app"
 
 [project.urls]
-Repository = "https://github.com/pinecone-io/skill-eval"
-Documentation = "https://github.com/pinecone-io/skill-eval/blob/main/README.md"
+Repository = "https://github.com/pinecone-io/cultivar"
+Documentation = "https://github.com/pinecone-io/cultivar/blob/main/README.md"
 
 [dependency-groups]
 test = ["pytest"]
