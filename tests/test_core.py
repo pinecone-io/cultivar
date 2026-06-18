@@ -1182,3 +1182,34 @@ class TestOrchestratorCallSurface:
             "without-skill saw the skill mounted in its cwd. The baseline variant must run "
             "with no skill discoverable; otherwise the with/without delta isn't honest."
         )
+
+
+class TestResolveSkillsBase:
+    """resolve_skills_base() precedence: --skills-dir flag > CULTIVAR_SKILLS_DIR env > ./.claude/skills."""
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        from evals.framework.reporting import resolve_skills_base
+
+        self.resolve = resolve_skills_base
+
+    def test_default_is_dot_claude_skills(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CULTIVAR_SKILLS_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        assert self.resolve("") == tmp_path / ".claude" / "skills"
+
+    def test_env_var_overrides_default(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CULTIVAR_SKILLS_DIR", "skills")
+        monkeypatch.chdir(tmp_path)
+        assert self.resolve("") == tmp_path / "skills"
+
+    def test_flag_overrides_env(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CULTIVAR_SKILLS_DIR", "skills")
+        monkeypatch.chdir(tmp_path)
+        assert self.resolve("from-flag") == tmp_path / "from-flag"
+
+    def test_absolute_value_preserved(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CULTIVAR_SKILLS_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        abs_dir = tmp_path / "elsewhere" / "skills"
+        assert self.resolve(str(abs_dir)) == abs_dir

@@ -74,6 +74,8 @@ cultivar init my-skill
 
 This writes `./tasks/my-skill.yaml` and `./.claude/skills/my-skill/SKILL.md`.
 
+> **Tip:** to test skills *without* your interactive coding agent auto-loading them, keep them outside `.claude/` — e.g. set `CULTIVAR_SKILLS_DIR=skills` (or pass `--skills-dir skills`) and `init` scaffolds into `./skills/my-skill/`. See [where skills live](docs/concepts.md#where-skills-live-and-testing-in-isolation).
+
 **3. Edit the skill** (`.claude/skills/my-skill/SKILL.md`)
 
 The skill file is what the agent sees when you invoke `/my-skill`. Write it like a concise brief: what the skill does, when to use it, and the key commands or patterns it should follow. Keep it tight — a few focused sections outperform a wall of text. If you're not sure where to start, drop your existing docs or a rough draft into Claude and ask it to write a SKILL.md for you.

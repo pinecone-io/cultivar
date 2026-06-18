@@ -1,5 +1,6 @@
 """Shared reporting utilities for the eval framework."""
 
+import os
 from collections import defaultdict
 from pathlib import Path
 from typing import TypedDict
@@ -11,6 +12,21 @@ from rich.table import Table
 from rich.text import Text
 
 console = Console()
+
+
+def resolve_skills_base(skills_dir_flag: str = "") -> Path:
+    """Resolve the skills root directory (the dir that contains <skill-name>/SKILL.md).
+
+    Precedence: ``--skills-dir`` flag > ``CULTIVAR_SKILLS_DIR`` env var > ``./.claude/skills``.
+    Relative values are anchored to the current working directory. Keeping skills under a
+    non-``.claude`` dir (e.g. ``./skills``) lets you eval them without your interactive coding
+    agent auto-loading them; cultivar still copies only the named skill into each isolated run.
+    """
+    raw = skills_dir_flag or os.environ.get("CULTIVAR_SKILLS_DIR") or ""
+    if raw:
+        p = Path(raw)
+        return p if p.is_absolute() else Path.cwd() / p
+    return Path.cwd() / ".claude" / "skills"
 
 
 class _VariantStats(TypedDict):

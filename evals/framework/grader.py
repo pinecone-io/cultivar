@@ -11,7 +11,7 @@ import yaml
 from anthropic import Anthropic
 from anthropic.types import TextBlock
 
-from evals.framework.reporting import console, print_report, resolve_results_dir
+from evals.framework.reporting import console, print_report, resolve_results_dir, resolve_skills_base
 
 
 def _require_anthropic_key() -> None:
@@ -34,7 +34,6 @@ def _require_anthropic_key() -> None:
 
 
 EXAMPLES_DIR = Path.cwd() / "examples"
-DEFAULT_SKILLS_DIR = Path.cwd() / ".claude" / "skills"
 
 DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 
@@ -584,7 +583,9 @@ def main(
     report: bool = typer.Option(
         True, help="Print the report after grading. Use --no-report to only write grades.json."
     ),
-    skills_dir: str = typer.Option("", "--skills-dir", help="Override path to skills root. Default: ./.claude/skills."),
+    skills_dir: str = typer.Option(
+        "", "--skills-dir", help="Skills root dir. Overrides CULTIVAR_SKILLS_DIR env; default ./.claude/skills."
+    ),
 ):
     """Grade an existing results dir with the LLM grader; writes grades.json and prints a report.
 
@@ -628,7 +629,7 @@ def main(
         console.print(f"[dim]{n_examples} calibration examples available[/dim]")
 
     # Load SKILL.md for grader context
-    base_dir = Path(skills_dir) if skills_dir else DEFAULT_SKILLS_DIR
+    base_dir = resolve_skills_base(skills_dir)
     skill_md = base_dir / skill / "SKILL.md"
     skill_content = ""
     if skill_md.exists():
