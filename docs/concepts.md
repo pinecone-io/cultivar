@@ -48,6 +48,30 @@ If `with-skill` beats `with-docs` on pass rate or cost, your distillation is rea
 
 > **Caveat** The without-skill variant isn't a strictly identical baseline across all runners. On **Claude**, without-skill is a clean baseline — same flags, just no skill mounted and no `Use the /<skill>` in the prompt; we used to pass `--bare` but removed it after it silently filtered `Write` from the tool set and broke code-gen. On **Copilot**, without-skill still passes `--no-custom-instructions` and `--excluded-tools skill`, so the delta there reflects skill + AGENTS.md loading. Pass-rate comparisons are honest everywhere; token/cost comparisons are directionally useful but not strictly like-for-like across runners.
 
+## Where skills live (and testing in isolation)
+
+cultivar tests **one** skill per run — the one you name with `-s/--skill`. It resolves that skill from a single directory and never sweeps the whole folder, so a repo full of unrelated skills is safe: only the named one is ever loaded.
+
+**Resolution order** for the skills root (the dir that holds `<skill-name>/SKILL.md`):
+
+1. `--skills-dir <path>` flag
+2. `CULTIVAR_SKILLS_DIR` env var
+3. `./.claude/skills` (default)
+
+**Testing in isolation.** If your skills-under-test live in `.claude/skills/`, your *interactive* coding agent (Claude Code, etc.) running in that repo will also auto-load them — so a skill you're only evaluating becomes active in your everyday agent. To avoid that, keep them under a non-`.claude` directory (e.g. `./skills`) and point cultivar at it:
+
+```bash
+export CULTIVAR_SKILLS_DIR=skills      # or pass --skills-dir skills per command
+cultivar init my-skill                 # scaffolds ./skills/my-skill/SKILL.md
+cultivar run -s my-skill -r claude --grade
+```
+
+That's exactly the shape of a skills monorepo like [pinecone-io/skills](https://github.com/pinecone-io/skills) (`skills/<name>/SKILL.md`): set `CULTIVAR_SKILLS_DIR=skills` once (e.g. in a CI job) and every command resolves correctly.
+
+**What the eval agent sees.** Wherever the *source* lives, cultivar copies only the named skill into each run's isolated workspace (a tempdir locally, a fresh sandbox remotely) at `.claude/skills/<name>/`, so the agent-under-eval discovers it there. Your other skills are never copied into a run.
+
+> **Local caveat.** Locally the run happens in a `/tmp` tempdir, so your repo's other skills aren't reachable — but a coding-CLI agent may still load **machine-global** skills from `~/.claude/skills/` (user-level, not your repo), which can subtly contaminate the `without-skill` control. `--remote` is fully isolated; prefer it for rigorous comparisons.
+
 ## What "better" means
 
 Three signals, all in `grades.json` and the report:

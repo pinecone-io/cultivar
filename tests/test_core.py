@@ -986,6 +986,26 @@ class TestCodeGenEmptyWorkdirAutofail:
         assert result["suggestions"]
         assert "Write" in result["suggestions"][0]["fix"]
 
+    def test_code_gen_empty_workdir_surfaces_run_error(self):
+        """When the workdir is empty because the agent RUN errored (e.g. a bad
+        API key), the autofail surfaces that error rather than the generic
+        'check Write/Edit' suggestion."""
+        task = {"id": "t", "category": "code-gen", "ground_truth": {"criteria": "x"}}
+        conv = {"conversation_md": "**User:** write greeting.txt\n\n**Assistant:** Invalid API key · Fix external API key\n"}
+        result = self.grade(
+            client=None,  # ty: ignore[invalid-argument-type] -- intentional: autofail returns before using client
+            model="x",
+            task=task,
+            conversation=conv,
+            examples_block="",
+            skill_content="",
+            workdir_content="",
+        )
+        assert result["pass"] is False
+        blob = (result["reasoning"] + result["suggestions"][0]["cause"] + result["suggestions"][0]["fix"]).lower()
+        assert "invalid api key" in blob
+        assert "write/edit" not in result["suggestions"][0]["fix"].lower()
+
     def test_code_gen_with_workdir_proceeds_to_grader(self, monkeypatch):
         """When workdir has content, we don't short-circuit — verified by the
         function trying to call client.messages.create and raising AttributeError
@@ -1162,3 +1182,34 @@ class TestOrchestratorCallSurface:
             "without-skill saw the skill mounted in its cwd. The baseline variant must run "
             "with no skill discoverable; otherwise the with/without delta isn't honest."
         )
+
+
+class TestResolveSkillsBase:
+    """resolve_skills_base() precedence: --skills-dir flag > CULTIVAR_SKILLS_DIR env > ./.claude/skills."""
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        from evals.framework.reporting import resolve_skills_base
+
+        self.resolve = resolve_skills_base
+
+    def test_default_is_dot_claude_skills(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CULTIVAR_SKILLS_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        assert self.resolve("") == tmp_path / ".claude" / "skills"
+
+    def test_env_var_overrides_default(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CULTIVAR_SKILLS_DIR", "skills")
+        monkeypatch.chdir(tmp_path)
+        assert self.resolve("") == tmp_path / "skills"
+
+    def test_flag_overrides_env(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CULTIVAR_SKILLS_DIR", "skills")
+        monkeypatch.chdir(tmp_path)
+        assert self.resolve("from-flag") == tmp_path / "from-flag"
+
+    def test_absolute_value_preserved(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CULTIVAR_SKILLS_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        abs_dir = tmp_path / "elsewhere" / "skills"
+        assert self.resolve(str(abs_dir)) == abs_dir

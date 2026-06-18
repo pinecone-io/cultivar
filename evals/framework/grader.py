@@ -11,7 +11,7 @@ import yaml
 from anthropic import Anthropic
 from anthropic.types import TextBlock
 
-from evals.framework.reporting import console, print_report, resolve_results_dir
+from evals.framework.reporting import console, print_report, resolve_results_dir, resolve_skills_base
 
 
 def _require_anthropic_key() -> None:
@@ -34,7 +34,6 @@ def _require_anthropic_key() -> None:
 
 
 EXAMPLES_DIR = Path.cwd() / "examples"
-DEFAULT_SKILLS_DIR = Path.cwd() / ".claude" / "skills"
 
 DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 
@@ -376,6 +375,38 @@ def build_grader_prompt(
     return "\n".join(parts)
 
 
+# Markers that indicate the agent RUN itself failed (auth/API/quota/etc.) rather
+# than a clean run that simply wrote nothing — used to give an accurate cause when
+# a code-gen workdir is empty (see grade_one's autofail).
+_RUN_ERROR_MARKERS = (
+    "invalid api key",
+    "fix external api key",
+    "authentication_error",
+    "permission denied",
+    "rate limit",
+    "overloaded_error",
+    "insufficient_quota",
+    "credit balance is too low",
+    "could not resolve",
+)
+
+
+def _detect_run_error(conversation: dict, conv_str: str) -> str:
+    """Short description of an agent-run error if the trace shows one, else ""."""
+    if conversation.get("is_error") or conversation.get("api_error_status"):
+        result = (conversation.get("result") or "").strip()
+        if result:
+            return result[:200]
+    low = conv_str.lower()
+    for marker in _RUN_ERROR_MARKERS:
+        if marker in low:
+            for line in conv_str.splitlines():
+                if marker in line.lower():
+                    return line.strip().lstrip("*# ").strip()[:200]
+            return marker
+    return ""
+
+
 def grade_one(
     client: Anthropic,
     model: str,
@@ -409,6 +440,20 @@ def grade_one(
     # otherwise pattern-match against Skill Reference / Reference Material
     # and report fabricated code as evidence.
     if task.get("category") == "code-gen" and not workdir_content.strip():
+        run_error = _detect_run_error(conversation, conv_str)
+        if run_error:
+            return {
+                "pass": False,
+                "proposed_command": "",
+                "evidence": "",
+                "reasoning": f"Code-gen task produced no files: the agent run errored ({run_error}). Not sent to grader.",
+                "suggestions": [
+                    {
+                        "cause": f"The agent run failed before writing any files: {run_error}",
+                        "fix": "Resolve the agent error shown in the conversation (e.g. fix the API key / auth in your Modal secret or local environment), then re-run. See <run>/<runner>/<base>.md and .stderr.log.",
+                    }
+                ],
+            }
         return {
             "pass": False,
             "proposed_command": "",
@@ -538,7 +583,9 @@ def main(
     report: bool = typer.Option(
         True, help="Print the report after grading. Use --no-report to only write grades.json."
     ),
-    skills_dir: str = typer.Option("", "--skills-dir", help="Override path to skills root. Default: ./.claude/skills."),
+    skills_dir: str = typer.Option(
+        "", "--skills-dir", help="Skills root dir. Overrides CULTIVAR_SKILLS_DIR env; default ./.claude/skills."
+    ),
 ):
     """Grade an existing results dir with the LLM grader; writes grades.json and prints a report.
 
@@ -582,7 +629,7 @@ def main(
         console.print(f"[dim]{n_examples} calibration examples available[/dim]")
 
     # Load SKILL.md for grader context
-    base_dir = Path(skills_dir) if skills_dir else DEFAULT_SKILLS_DIR
+    base_dir = resolve_skills_base(skills_dir)
     skill_md = base_dir / skill / "SKILL.md"
     skill_content = ""
     if skill_md.exists():

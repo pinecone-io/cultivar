@@ -4,7 +4,7 @@ from pathlib import Path
 
 import typer
 
-from evals.framework.reporting import console
+from evals.framework.reporting import console, resolve_skills_base
 
 app = typer.Typer(pretty_exceptions_enable=False)
 
@@ -92,20 +92,25 @@ def main(
     skill_md: bool = typer.Option(
         True,
         "--skill-md/--no-skill-md",
-        help="Also create .claude/skills/<skill>/SKILL.md as a placeholder. Default: yes.",
+        help="Also create <skills-dir>/<skill>/SKILL.md as a placeholder. Default: yes.",
+    ),
+    skills_dir: str = typer.Option(
+        "", "--skills-dir", help="Skills root dir. Overrides CULTIVAR_SKILLS_DIR env; default ./.claude/skills."
     ),
 ):
-    """Scaffold tasks/<skill>.yaml (+ placeholder .claude/skills/<skill>/SKILL.md) for a new skill.
+    """Scaffold tasks/<skill>.yaml (+ placeholder <skills-dir>/<skill>/SKILL.md) for a new skill.
 
     Writes ./tasks/<skill>.yaml with three template tasks (CLI-style, code-gen,
-    and one with context_refs to activate the with-docs runner variant), and
-    ./.claude/skills/<skill>/SKILL.md with a stub. Both paths are cwd-relative —
-    run this from the repo where you want the skill to live.
+    and one with context_refs to activate the with-docs runner variant), and a
+    SKILL.md stub under the resolved skills dir. The skills dir is ./.claude/skills
+    by default; override with --skills-dir or the CULTIVAR_SKILLS_DIR env var (e.g.
+    keep skills under ./skills so your interactive agent doesn't auto-load them).
 
     Examples:
-      cultivar init my-skill                # scaffold both files
-      cultivar init my-skill --no-skill-md  # only the task YAML; reuse an existing skill
-      cultivar init my-skill --force        # overwrite an existing tasks file
+      cultivar init my-skill                  # scaffold both files
+      cultivar init my-skill --skills-dir skills  # scaffold SKILL.md under ./skills/
+      cultivar init my-skill --no-skill-md    # only the task YAML; reuse an existing skill
+      cultivar init my-skill --force          # overwrite an existing tasks file
 
     See docs/task-yaml.md for the full task schema and docs/concepts.md for the
     with-skill / without-skill / with-docs variant breakdown.
@@ -113,27 +118,33 @@ def main(
     cwd = Path.cwd()
     tasks_dir = cwd / "tasks"
     task_file = tasks_dir / f"{skill}.yaml"
-    skill_md_path = cwd / ".claude" / "skills" / skill / "SKILL.md"
+    skill_md_path = resolve_skills_base(skills_dir) / skill / "SKILL.md"
+
+    def _disp(p: Path) -> str:
+        try:
+            return str(p.relative_to(cwd))
+        except ValueError:
+            return str(p)
 
     created = []
     skipped = []
 
     # tasks/<skill>.yaml
     if task_file.exists() and not force:
-        skipped.append(f"{task_file.relative_to(cwd)} (already exists; use --force to overwrite)")
+        skipped.append(f"{_disp(task_file)} (already exists; use --force to overwrite)")
     else:
         tasks_dir.mkdir(parents=True, exist_ok=True)
         task_file.write_text(TASK_TEMPLATE.format(skill=skill))
-        created.append(str(task_file.relative_to(cwd)))
+        created.append(_disp(task_file))
 
-    # .claude/skills/<skill>/SKILL.md — only if --skill-md and not already there
+    # <skills-dir>/<skill>/SKILL.md — only if --skill-md and not already there
     if skill_md:
         if skill_md_path.exists() and not force:
-            skipped.append(f"{skill_md_path.relative_to(cwd)} (already exists)")
+            skipped.append(f"{_disp(skill_md_path)} (already exists)")
         else:
             skill_md_path.parent.mkdir(parents=True, exist_ok=True)
             skill_md_path.write_text(SKILL_TEMPLATE.format(skill=skill))
-            created.append(str(skill_md_path.relative_to(cwd)))
+            created.append(_disp(skill_md_path))
 
     for path in created:
         console.print(f"[green]created[/green]  {path}")
@@ -141,8 +152,9 @@ def main(
         console.print(f"[yellow]skipped[/yellow]  {note}")
 
     if created:
+        sd = f" --skills-dir {skills_dir}" if skills_dir else ""
         console.print(
-            f"\nNext: edit the tasks file and run [bold]cultivar run --skill {skill} --runner claude[/bold]"
+            f"\nNext: edit the tasks file and run [bold]cultivar run --skill {skill} --runner claude{sd}[/bold]"
         )
 
 

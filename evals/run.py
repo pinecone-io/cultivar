@@ -13,13 +13,13 @@ from pathlib import Path
 import typer
 import yaml
 
+from evals.framework.reporting import resolve_skills_base
 from evals.runners.claude import ClaudeRunner
 from evals.runners.copilot import CopilotRunner
 from evals.runners.gemini import GeminiRunner
 
 TASKS_DIR = Path.cwd() / "tasks"
 RESULTS_DIR = Path.cwd() / "results"
-DEFAULT_SKILLS_DIR = Path.cwd() / ".claude" / "skills"
 
 RUNNER_CLASSES = {
     "claude": ClaudeRunner,
@@ -410,7 +410,9 @@ def main(
         help="Wall-clock budget (seconds) for each agent CLI invocation. Remote sandboxes get this plus a 60s buffer for setup/verify/teardown.",
     ),
     repeat: int = typer.Option(1, "--repeat", "-n", help="Run each (task, variant) N times for reliability stats."),
-    skills_dir: str = typer.Option("", "--skills-dir", help="Override path to skills root. Default: ./.claude/skills."),
+    skills_dir: str = typer.Option(
+        "", "--skills-dir", help="Skills root dir. Overrides CULTIVAR_SKILLS_DIR env; default ./.claude/skills."
+    ),
     title: str = typer.Option("", "--title", help="Name this run; appears in the results dir name."),
     notes: str = typer.Option("", "--notes", help="Free-form notes saved to <run>/notes.md and shown in the report."),
     remote: bool = typer.Option(
@@ -460,7 +462,7 @@ def main(
         raise typer.Exit(1)
 
     # Resolve skill directory for with-skill variant
-    base_dir = Path(skills_dir) if skills_dir else DEFAULT_SKILLS_DIR
+    base_dir = resolve_skills_base(skills_dir)
     skill_dir = base_dir / skill
     if not (skill_dir / "SKILL.md").exists():
         typer.echo(f"Error: Skill '{skill}' not found at {skill_dir}")
