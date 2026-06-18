@@ -8,7 +8,13 @@ Use traces to iteratively refine skills and optimize them against tasks.
 
 Benchmark against skills, docs, and baselines. And, even run in parallel simulatenously for faster execution.
 
-Want to use cultivar with an agent? Point it at this repo, or ask it to call --help to learn the tool!
+**Want your coding agent to drive cultivar?** Install the bundled skill:
+
+```bash
+npx skills add https://github.com/pinecone-io/cultivar --skill cultivar
+```
+
+It lands in `.claude/skills/cultivar/` (project scope) so your agent can invoke `/cultivar`. Keep it project-scoped — avoid the global `-g` install, which would sit in-context during local eval runs and skew the `without-skill` baseline (`--remote` is isolated regardless). The skill is never auto-tested: `cultivar run` only ever loads the single skill you pass to `-s`.
 
 
 ## Prerequisites
