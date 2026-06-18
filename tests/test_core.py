@@ -986,6 +986,26 @@ class TestCodeGenEmptyWorkdirAutofail:
         assert result["suggestions"]
         assert "Write" in result["suggestions"][0]["fix"]
 
+    def test_code_gen_empty_workdir_surfaces_run_error(self):
+        """When the workdir is empty because the agent RUN errored (e.g. a bad
+        API key), the autofail surfaces that error rather than the generic
+        'check Write/Edit' suggestion."""
+        task = {"id": "t", "category": "code-gen", "ground_truth": {"criteria": "x"}}
+        conv = {"conversation_md": "**User:** write greeting.txt\n\n**Assistant:** Invalid API key · Fix external API key\n"}
+        result = self.grade(
+            client=None,  # ty: ignore[invalid-argument-type] -- intentional: autofail returns before using client
+            model="x",
+            task=task,
+            conversation=conv,
+            examples_block="",
+            skill_content="",
+            workdir_content="",
+        )
+        assert result["pass"] is False
+        blob = (result["reasoning"] + result["suggestions"][0]["cause"] + result["suggestions"][0]["fix"]).lower()
+        assert "invalid api key" in blob
+        assert "write/edit" not in result["suggestions"][0]["fix"].lower()
+
     def test_code_gen_with_workdir_proceeds_to_grader(self, monkeypatch):
         """When workdir has content, we don't short-circuit — verified by the
         function trying to call client.messages.create and raising AttributeError

@@ -376,6 +376,38 @@ def build_grader_prompt(
     return "\n".join(parts)
 
 
+# Markers that indicate the agent RUN itself failed (auth/API/quota/etc.) rather
+# than a clean run that simply wrote nothing — used to give an accurate cause when
+# a code-gen workdir is empty (see grade_one's autofail).
+_RUN_ERROR_MARKERS = (
+    "invalid api key",
+    "fix external api key",
+    "authentication_error",
+    "permission denied",
+    "rate limit",
+    "overloaded_error",
+    "insufficient_quota",
+    "credit balance is too low",
+    "could not resolve",
+)
+
+
+def _detect_run_error(conversation: dict, conv_str: str) -> str:
+    """Short description of an agent-run error if the trace shows one, else ""."""
+    if conversation.get("is_error") or conversation.get("api_error_status"):
+        result = (conversation.get("result") or "").strip()
+        if result:
+            return result[:200]
+    low = conv_str.lower()
+    for marker in _RUN_ERROR_MARKERS:
+        if marker in low:
+            for line in conv_str.splitlines():
+                if marker in line.lower():
+                    return line.strip().lstrip("*# ").strip()[:200]
+            return marker
+    return ""
+
+
 def grade_one(
     client: Anthropic,
     model: str,
@@ -409,6 +441,20 @@ def grade_one(
     # otherwise pattern-match against Skill Reference / Reference Material
     # and report fabricated code as evidence.
     if task.get("category") == "code-gen" and not workdir_content.strip():
+        run_error = _detect_run_error(conversation, conv_str)
+        if run_error:
+            return {
+                "pass": False,
+                "proposed_command": "",
+                "evidence": "",
+                "reasoning": f"Code-gen task produced no files: the agent run errored ({run_error}). Not sent to grader.",
+                "suggestions": [
+                    {
+                        "cause": f"The agent run failed before writing any files: {run_error}",
+                        "fix": "Resolve the agent error shown in the conversation (e.g. fix the API key / auth in your Modal secret or local environment), then re-run. See <run>/<runner>/<base>.md and .stderr.log.",
+                    }
+                ],
+            }
         return {
             "pass": False,
             "proposed_command": "",
