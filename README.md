@@ -8,13 +8,13 @@ Use traces to iteratively refine skills and optimize them against tasks.
 
 Benchmark against skills, docs, and baselines. And, even run in parallel simulatenously for faster execution.
 
-**Want your coding agent to drive cultivar?** Install the bundled skill:
+**Two ways to run it:** the `cultivar` CLI directly, or install the bundled skill and let your coding agent drive it:
 
 ```bash
 npx skills add https://github.com/pinecone-io/cultivar --skill cultivar
 ```
 
-It lands in `.claude/skills/cultivar/` (project scope) so your agent can invoke `/cultivar`. Keep it project-scoped — avoid the global `-g` install, which would sit in-context during local eval runs and skew the `without-skill` baseline (`--remote` is isolated regardless). The skill is never auto-tested: `cultivar run` only ever loads the single skill you pass to `-s`.
+Same engine either way — but when an agent drives it you won't watch the live run / `--remote` sandbox dashboard as directly as in your own terminal. Keep the skill project-scoped (not `-g`); it's never auto-tested.
 
 
 ## Prerequisites
