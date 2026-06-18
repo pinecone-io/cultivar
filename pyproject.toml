@@ -1,6 +1,6 @@
 [project]
 name = "cultivar"
-version = "0.1.0"
+version = "0.2.0"
 description = "Eval framework for testing whether agent skills improve behavior across coding CLIs"
 readme = "README.md"
 license = { text = "MIT" }
