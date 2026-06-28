@@ -224,4 +224,6 @@ examples/
 
 # Internal-only docs (Pinecone-shared workspace info etc.) — public repo carries the DIY doc only
 docs/internal-*.md
-CLAUDE.md
+# Anchored to repo root: a bare `CLAUDE.md` also matches docs/runners/claude.md on
+# case-insensitive filesystems (macOS), which shadowed the tracked runner doc.
+/CLAUDE.md
