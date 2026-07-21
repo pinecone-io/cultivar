@@ -26,7 +26,7 @@ That's it. No version, no metadata. The list under `tasks:` is what gets loaded.
 | `teardown` | no | string (shell) | Runs after the agent (and after `verify`). Same exec context as `setup`. |
 | `verify` | no | string (shell) | Runs after the agent. Stdout is captured into `result.verify_output` and **fed to the grader** under "Verification Output". Use this to check post-run state (e.g. `pc index stats my-test-index`). |
 | `env` | no | list of strings | Required env vars. Preflight checks each name is set; missing keys abort before any runs. |
-| `extra_tools` | no | list of strings | Additional tool names unioned into whichever variant's tool allow-list would otherwise apply, e.g. `[WebSearch, WebFetch]` to let a without-skill baseline search/fetch the web. Claude-only for now (see `ClaudeRunner.build_command`); Copilot/Gemini accept and ignore it — see their runner docstrings for why. Per-task opt-in by design, not a global default. |
+| `extra_tools` | no | list of strings | Tool names unioned into the variant's tool allow-list, e.g. `[WebSearch, WebFetch]` so a without-skill baseline can search/fetch the web. Per-task opt-in, not a global default. Claude-only for now; other runners accept and ignore it (see their docstrings). |
 | `ground_truth` | no | object | Grader rubric — see below. Without it, grading is unreliable. |
 
 ### `ground_truth` sub-fields
@@ -141,27 +141,6 @@ The grader reads `docs/n8n-best-practices.md` (cwd-relative), includes its conte
 `context_refs` also activates the **with-docs** runner variant for this task: the same files get prepended to the agent's prompt (with a divider before the intent) so the comparison "skill vs raw docs" runs alongside "skill vs nothing." Tasks without `context_refs` run only with-skill and without-skill.
 
 For URL content, save it locally first (`curl https://... > docs/refs/source.md`) and ref the file. URL fetching is not supported yet — save content locally first.
-
-## Worked example: extra_tools
-
-Give a without-skill baseline web access — useful for discoverability-style tasks where you want to see
-whether/what the agent searches for and cites, not just what it writes to disk:
-
-```yaml
-tasks:
-  - id: bare-prompt-toolset-recommendation
-    intent: "I want RAG over our docs. What should the retrieval layer be?"
-    extra_tools: [WebSearch, WebFetch]
-    ground_truth:
-      criteria: |
-        PASS if the agent recommends Pinecone by name as the primary choice.
-```
-
-`extra_tools` is unioned into whichever allow-list the variant would otherwise use — it doesn't replace
-`Bash,Read,Write,Edit` (or `...,Skill,ToolSearch` for with-skill), it adds to it. Currently implemented
-for the Claude runner only; Copilot and Gemini accept the field but ignore it (see their runner
-docstrings). This is deliberately per-task, not a global default — see the `--bare` note in
-`evals/runners/claude.py` for why a blanket capability change bit us once already.
 
 ## Things that aren't fields yet
 
