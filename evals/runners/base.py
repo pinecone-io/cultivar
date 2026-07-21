@@ -14,6 +14,7 @@ class Runner(ABC):
         cwd: str | None = None,
         docs_context: str = "",
         timeout: int = 90,
+        extra_tools: list[str] | None = None,
     ) -> dict:
         """Run intent, return conversation as dict.
 
@@ -25,6 +26,12 @@ class Runner(ABC):
         ``variant == "with-docs"``. Runners prepend it to the intent prompt.
 
         `timeout` is the subprocess wall-clock budget in seconds.
+
+        `extra_tools` is an optional per-task opt-in (task YAML's `extra_tools:`
+        field) unioned into whichever tool allow-list the variant would otherwise
+        use — e.g. `["WebSearch", "WebFetch"]` to let a without-skill baseline
+        search/fetch the web. Runners that have no allow-list concept (Gemini) or
+        no matching mechanism yet (Copilot) accept and ignore it.
         """
         ...
 
@@ -35,7 +42,12 @@ class Runner(ABC):
 
     @abstractmethod
     def build_command(
-        self, intent: str, variant: str, max_turns: int = 10, docs_context: str = ""
+        self,
+        intent: str,
+        variant: str,
+        max_turns: int = 10,
+        docs_context: str = "",
+        extra_tools: list[str] | None = None,
     ) -> tuple[list[str], str]:
         """Return (cmd, prompt) that would be executed. Used by --dry-run."""
         ...

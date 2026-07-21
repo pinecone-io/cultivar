@@ -175,6 +175,7 @@ def run_local(tasks, runner_cls, variants, skill_dir, max_turns, repeat, run_dir
                         cwd=tmpdir,
                         docs_context=docs_context if v == "with-docs" else "",
                         timeout=timeout,
+                        extra_tools=t.get("extra_tools") or None,
                     )
 
                     if t.get("verify"):
@@ -247,6 +248,7 @@ def run_remote(tasks, runner_name, variants, skill_dir, max_turns, repeat, run_d
                         "setup": t.get("setup", ""),
                         "teardown": t.get("teardown", ""),
                         "verify": t.get("verify", ""),
+                        "extra_tools": t.get("extra_tools") or [],
                         "base": base,
                         "task_id": t["id"],
                         "run_num": i + 1,
@@ -344,6 +346,7 @@ def run_remote(tasks, runner_name, variants, skill_dir, max_turns, repeat, run_d
                 workdir_out=runner_dir / f"{item['base']}.workdir",
                 docs_context=item.get("docs_context", ""),
                 timeout=timeout,
+                extra_tools=item.get("extra_tools") or [],
             )
         except Exception as e:
             result = {
@@ -498,7 +501,9 @@ def main(
             for v in variants_for_task(t, variants):
                 total_runs += 1
                 ctx = docs_context if v == "with-docs" else ""
-                cmd, prompt = r.build_command(t["intent"], v, max_turns, docs_context=ctx)
+                cmd, prompt = r.build_command(
+                    t["intent"], v, max_turns, docs_context=ctx, extra_tools=t.get("extra_tools") or None
+                )
                 typer.echo(f"\n{'━' * 70}")
                 typer.echo(f"Task:    {t['id']}")
                 typer.echo(f"Variant: {v}")
