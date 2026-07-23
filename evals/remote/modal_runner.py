@@ -30,7 +30,9 @@ eval_image = (
         "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -",
         "apt-get install -y nodejs",
     )
-    .run_commands("npm install -g @anthropic-ai/claude-code @google/gemini-cli @github/copilot")
+    .run_commands(
+        "npm install -g @anthropic-ai/claude-code @google/gemini-cli @github/copilot @pinecone-database/mcp"
+    )
     .pip_install("pyyaml")
     .add_local_dir(str(EVALS_DIR / "runners"), remote_path="/workspace/evals/runners")
     .add_local_file(str(EVALS_DIR / "remote" / "entry.py"), remote_path="/workspace/evals/remote/entry.py")
@@ -132,6 +134,21 @@ def run_one_remote(
             docs_file_remote = "/workspace/.docs_context.txt"
             with sb.open(docs_file_remote, "wb") as f:
                 f.write(docs_context.encode("utf-8"))
+
+        # with-docs-mcp variant: write an MCP config the agent's CLI can load.
+        # The Pinecone MCP server is installed in the image; PINECONE_API_KEY
+        # comes from the sandbox secret.
+        if variant == "with-docs-mcp":
+            mcp_config = {
+                "mcpServers": {
+                    "pinecone-docs": {
+                        "command": "pinecone-mcp",
+                        "args": [],
+                    }
+                }
+            }
+            with sb.open("/workspace/.mcp.json", "wb") as f:
+                f.write(json.dumps(mcp_config).encode("utf-8"))
 
         # Run the eval via entry.py
         cmd_args = [
