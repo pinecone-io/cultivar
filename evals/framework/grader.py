@@ -140,6 +140,57 @@ def load_workdir_files(workdir: Path) -> str:
     return out
 
 
+def _fetch_url_ref(ref: str, cap: int) -> str | None:
+    """Fetch a remote doc page for a URL context_ref, cached locally.
+
+    URL refs (e.g. https://docs.pinecone.io/...) used to be silently skipped,
+    which left the with-docs variant and the grader's ground truth EMPTY for
+    those tasks — making the "live docs" comparison meaningless. We fetch the
+    page (trying the Mintlify raw-markdown `.md` form first, then the HTML page
+    with a crude tag-strip), cache it under ./.docs_cache, and return text.
+    Returns None on failure so the caller can warn-and-skip.
+    """
+    import hashlib
+    import urllib.request
+
+    cache_dir = Path.cwd() / ".docs_cache"
+    try:
+        cache_dir.mkdir(exist_ok=True)
+        cf = cache_dir / (hashlib.sha1(ref.encode()).hexdigest() + ".txt")
+        if cf.is_file():
+            return cf.read_text(errors="replace")
+    except Exception:
+        cf = None
+
+    candidates = [ref] if ref.endswith(".md") else [ref + ".md", ref]
+    for url in candidates:
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "skill-eval-docs/1.0", "Accept": "text/markdown,text/plain,text/html"},
+            )
+            with urllib.request.urlopen(req, timeout=20) as r:
+                raw = r.read().decode("utf-8", errors="replace")
+        except Exception:
+            continue
+        head = raw[:2000].lower()
+        text = raw
+        if "<!doctype html" in head or "<html" in head:
+            text = re.sub(r"(?is)<(script|style|nav|header|footer|svg)\b.*?</\1>", " ", raw)
+            text = re.sub(r"(?s)<[^>]+>", " ", text)
+            text = re.sub(r"[ \t]{2,}", " ", text)
+            text = re.sub(r"\n\s*\n\s*\n+", "\n\n", text)
+        text = text.strip()[:cap]
+        if text:
+            if cf is not None:
+                try:
+                    cf.write_text(text)
+                except Exception:
+                    pass
+            return text
+    return None
+
+
 def _resolve_refs_body(refs: list[str], cap: int = CONTEXT_REFS_CAP_BYTES) -> tuple[str, int]:
     """Read each ref, render as fenced markdown sections, capped at `cap` bytes total.
 
@@ -156,6 +207,23 @@ def _resolve_refs_body(refs: list[str], cap: int = CONTEXT_REFS_CAP_BYTES) -> tu
     skipped_capped = 0
 
     for ref in refs:
+        if ref.startswith(("http://", "https://")):
+            content = _fetch_url_ref(ref, remaining)
+            if not content:
+                console.print(f"[yellow]Warning: could not fetch context_ref URL, skipping: {ref}[/yellow]")
+                continue
+            header = f"\n### {ref}\n```markdown\n"
+            footer = "\n```\n"
+            budget = remaining - len(header) - len(footer)
+            if budget <= 0:
+                skipped_capped += 1
+                continue
+            if len(content) > budget:
+                content = content[:budget] + "\n... (truncated)"
+                skipped_capped += 1
+            parts.append(header + content + footer)
+            remaining -= len(header) + len(content) + len(footer)
+            continue
         p = Path(ref)
         if not p.is_absolute():
             p = Path.cwd() / ref
