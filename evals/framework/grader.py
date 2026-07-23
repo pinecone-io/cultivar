@@ -277,6 +277,8 @@ def build_grader_prompt(
     verify_output: str = "",
     workdir_content: str = "",
     refs_content: str = "",
+    verify_exit_code: int | None = None,
+    verify_stderr: str = "",
 ) -> str:
     gt = task.get("ground_truth", {})
     criteria = gt.get("criteria", "")
@@ -334,7 +336,27 @@ def build_grader_prompt(
         ]
     )
 
-    if verify_output:
+    if verify_exit_code is not None:
+        # Execution-based verification ran: the agent's generated code was actually
+        # executed against the real service. This is the authoritative signal.
+        status = "PASSED (exit 0)" if verify_exit_code == 0 else f"FAILED (exit {verify_exit_code})"
+        parts.extend(
+            [
+                "## Verification Output (EXECUTION — AUTHORITATIVE)",
+                "The agent's generated code was EXECUTED after the run against the real service. "
+                "This is the authoritative signal. If execution FAILED, the task FAILS regardless "
+                "of how the code reads on the page. If execution PASSED, the code runs — but still "
+                "confirm it used the specific API the criteria require (e.g. the documents/FTS API, "
+                "not a sparse-vector fallback) before passing.",
+                f"Execution result: {status}",
+            ]
+        )
+        if verify_output:
+            parts.append(f"stdout:\n```\n{verify_output[:4000]}\n```")
+        if verify_stderr:
+            parts.append(f"stderr:\n```\n{verify_stderr[:2000]}\n```")
+        parts.append("")
+    elif verify_output:
         parts.extend(
             [
                 "## Verification Output",
@@ -467,13 +489,46 @@ def grade_one(
             ],
         }
 
+    # Execution-based verification is authoritative. When a task ran a `verify`
+    # command (execution check) and it exited non-zero, the generated code did
+    # not actually run against the real service — autofail without asking the
+    # judge, which would otherwise pass plausible-but-broken code. Tasks with no
+    # verify command have verify_exit_code == None and fall through to the judge
+    # (the hybrid-grading path for tasks we can't execute end-to-end).
+    verify_exit_code = conversation.get("verify_exit_code")
+    verify_output = conversation.get("verify_output", "")
+    verify_stderr = conversation.get("verify_stderr", "")
+    if verify_exit_code is not None and verify_exit_code != 0:
+        return {
+            "pass": False,
+            "proposed_command": "",
+            "evidence": (verify_stderr or verify_output or "")[:500],
+            "reasoning": (
+                f"Execution check failed: the generated code exited {verify_exit_code} when run "
+                "against the real service. Code that does not execute fails regardless of how it reads."
+            ),
+            "suggestions": [
+                {
+                    "cause": "Generated code raised at runtime (wrong API surface, bad params, or missing setup).",
+                    "fix": "Read the verify stderr; fix the failing call. Common cause here: using an API shape that doesn't exist in the installed SDK.",
+                }
+            ],
+        }
+
     if len(conv_str) > 50000:
         conv_str = conv_str[:50000] + "\n... (truncated)"
 
-    verify_output = conversation.get("verify_output", "")
     refs_content = load_context_refs(task.get("ground_truth", {}).get("context_refs", []))
     prompt = build_grader_prompt(
-        task, conv_str, examples_block, skill_content, verify_output, workdir_content, refs_content
+        task,
+        conv_str,
+        examples_block,
+        skill_content,
+        verify_output,
+        workdir_content,
+        refs_content,
+        verify_exit_code=verify_exit_code,
+        verify_stderr=verify_stderr,
     )
 
     response = client.messages.create(
