@@ -8,6 +8,7 @@ unchanged inside the sandbox via entry.py.
 import json
 import os
 import time
+import uuid
 from pathlib import Path
 
 import modal
@@ -33,6 +34,7 @@ eval_image = (
     .pip_install("pyyaml")
     .add_local_dir(str(EVALS_DIR / "runners"), remote_path="/workspace/evals/runners")
     .add_local_file(str(EVALS_DIR / "remote" / "entry.py"), remote_path="/workspace/evals/remote/entry.py")
+    .add_local_file(str(EVALS_DIR / "remote" / "eval_isolate.py"), remote_path="/workspace/evals/remote/eval_isolate.py")
 )
 
 app = modal.App.lookup(_MODAL_APP_NAME, create_if_missing=True)
@@ -40,7 +42,10 @@ app = modal.App.lookup(_MODAL_APP_NAME, create_if_missing=True)
 # Wall-clock budget the sandbox itself gets, on top of the agent's per-call
 # timeout. The buffer covers image cold-start, setup, verify, teardown, and
 # workdir extraction — everything the sandbox does outside the agent run.
-SANDBOX_BUFFER_S = 60
+# Raised from 60s: execution-based verify actually runs the generated code
+# (real Pinecone index create + ready-poll + upsert + queries), which can take
+# a few minutes. Override with SKILL_EVAL_SANDBOX_BUFFER_S.
+SANDBOX_BUFFER_S = int(os.environ.get("SKILL_EVAL_SANDBOX_BUFFER_S", "360"))
 
 
 def run_one_remote(
@@ -59,6 +64,19 @@ def run_one_remote(
 ) -> dict:
     """Run a single eval task in a Modal sandbox. Returns the runner result dict."""
     secrets = [modal.Secret.from_name(SECRET_NAME)]
+    # The named eval-sandbox-secrets covers the agent CLI (ANTHROPIC_API_KEY).
+    # Execution-based `verify` runs the agent's generated code against the real
+    # service, so the sandbox also needs the data-plane keys. Inject whichever
+    # are present in the local env (loaded from .env) as an ephemeral, run-scoped
+    # secret — NOT persisted as a named Modal secret.
+    _extra = {
+        k: os.environ[k] for k in ("PINECONE_API_KEY", "COHERE_API_KEY", "OPENAI_API_KEY") if os.environ.get(k)
+    }
+    # Per-run index-name prefix: lets parallel runs share one Pinecone project
+    # without colliding on the hard-coded index names in the generated code.
+    # eval_isolate.apply()/teardown() read this from the sandbox env.
+    _extra["EVAL_IDX_PREFIX"] = "ev" + uuid.uuid4().hex[:6] + "-"
+    secrets.append(modal.Secret.from_dict(_extra))
     image = eval_image
 
     # Bake skill files into the image if needed
