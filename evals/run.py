@@ -114,9 +114,9 @@ def validate_env_vars(tasks: list[dict]):
         raise typer.Exit(1)
 
 
-def run_local(tasks, runner_cls, variants, skill_dir, max_turns, repeat, run_dir, timeout=60):
+def run_local(tasks, runner_cls, variants, skill_dir, max_turns, repeat, run_dir, timeout=60, model=""):
     """Run evals locally, sequentially."""
-    r = runner_cls(skill_dir=skill_dir)
+    r = runner_cls(skill_dir=skill_dir, model=model) if runner_cls is ClaudeRunner else runner_cls(skill_dir=skill_dir)
     # Variants are filtered per-task (with-docs only applies when the task has
     # context_refs), so the total reflects the actual work, not the matrix size.
     total = sum(len(variants_for_task(t, variants)) for t in tasks) * repeat
@@ -215,7 +215,7 @@ def run_local(tasks, runner_cls, variants, skill_dir, max_turns, repeat, run_dir
                         )
 
 
-def run_remote(tasks, runner_name, variants, skill_dir, max_turns, repeat, run_dir, parallel, timeout=60):
+def run_remote(tasks, runner_name, variants, skill_dir, max_turns, repeat, run_dir, parallel, timeout=60, model=""):
     """Run evals in Modal sandboxes, one sandbox per (task, variant, repeat)."""
     import time
 
@@ -250,6 +250,7 @@ def run_remote(tasks, runner_name, variants, skill_dir, max_turns, repeat, run_d
                         "base": base,
                         "task_id": t["id"],
                         "run_num": i + 1,
+                        "model": model,
                     }
                 )
 
@@ -344,6 +345,7 @@ def run_remote(tasks, runner_name, variants, skill_dir, max_turns, repeat, run_d
                 workdir_out=runner_dir / f"{item['base']}.workdir",
                 docs_context=item.get("docs_context", ""),
                 timeout=timeout,
+                model=item.get("model", ""),
             )
         except Exception as e:
             result = {
@@ -402,6 +404,11 @@ def main(
         "--variant",
         "-v",
         help="Limit to one variant: with-skill, without-skill, or with-docs. Default: every variant the task supports (with-docs requires task.ground_truth.context_refs).",
+    ),
+    model: str = typer.Option(
+        "",
+        "--model",
+        help="Agent model id to pin (e.g. claude-sonnet-5). Empty uses the agent CLI's default. Claude runner only.",
     ),
     max_turns: int = typer.Option(10, "--max-turns", help="Max agentic turns per run."),
     timeout: int = typer.Option(
@@ -543,11 +550,11 @@ def main(
     if remote:
         if runner not in REMOTE_RUNNERS:
             typer.echo(f"Note: '{runner}' doesn't support remote mode yet. Running locally.")
-            run_local(tasks, runner_cls, variants, skill_dir_str, max_turns, repeat, run_dir, timeout)
+            run_local(tasks, runner_cls, variants, skill_dir_str, max_turns, repeat, run_dir, timeout, model)
         else:
-            run_remote(tasks, runner, variants, skill_dir_str, max_turns, repeat, run_dir, parallel, timeout)
+            run_remote(tasks, runner, variants, skill_dir_str, max_turns, repeat, run_dir, parallel, timeout, model)
     else:
-        run_local(tasks, runner_cls, variants, skill_dir_str, max_turns, repeat, run_dir, timeout)
+        run_local(tasks, runner_cls, variants, skill_dir_str, max_turns, repeat, run_dir, timeout, model)
 
     # Post-run summary
     n_convos = len(tasks) * len(variants) * repeat

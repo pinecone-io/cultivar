@@ -63,6 +63,7 @@ def run_one_remote(
     workdir_src: str = "/workspace/app",
     docs_context: str = "",
     timeout: int = 90,
+    model: str = "",
 ) -> dict:
     """Run a single eval task in a Modal sandbox. Returns the runner result dict."""
     secrets = [modal.Secret.from_name(SECRET_NAME)]
@@ -169,6 +170,8 @@ def run_one_remote(
             "--timeout",
             str(timeout),
         ]
+        if model:
+            cmd_args.extend(["--model", model])
         if docs_file_remote:
             cmd_args.extend(["--docs-file", docs_file_remote])
         p = sb.exec(*cmd_args)

@@ -8,8 +8,9 @@ from .base import Runner, run_cli
 class ClaudeRunner(Runner):
     name = "claude"
 
-    def __init__(self, skill_dir: str | None = None):
+    def __init__(self, skill_dir: str | None = None, model: str = ""):
         self.skill_dir = skill_dir
+        self.model = model
 
     def variants(self) -> list[str]:
         return [
@@ -66,6 +67,10 @@ class ClaudeRunner(Runner):
             "--max-turns",
             str(max_turns),
         ]
+
+        # Pin the agent model when set (e.g. claude-sonnet-5). Empty => CLI default.
+        if self.model:
+            cmd.extend(["--model", self.model])
 
         if variant == "with-docs-mcp":
             mcp_cfg = os.environ.get("SKILL_EVAL_MCP_CONFIG", "/workspace/.mcp.json")
