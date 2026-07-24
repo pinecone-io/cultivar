@@ -964,6 +964,26 @@ class TestExtraTools:
             assert isinstance(cmd, list)
 
 
+class TestModelOverride:
+    """model (cultivar run --model, orchestration-level) appends --model to the Claude command."""
+
+    def test_claude_model_appends_flag(self):
+        from evals.runners.claude import ClaudeRunner
+
+        r = ClaudeRunner(skill_dir="/tmp/fake-skill")
+        cmd, _ = r.build_command("do the thing", "without-skill", max_turns=5, model="claude-opus-5")
+        idx = cmd.index("--model")
+        assert cmd[idx + 1] == "claude-opus-5"
+
+    def test_claude_model_none_omits_flag(self):
+        """Omitting model must not add --model at all (uses the CLI's own default)."""
+        from evals.runners.claude import ClaudeRunner
+
+        r = ClaudeRunner(skill_dir="/tmp/fake-skill")
+        cmd, _ = r.build_command("do the thing", "without-skill", max_turns=5)
+        assert "--model" not in cmd
+
+
 class TestEmptyTraceAutofail:
     """_has_agent_signal: traces with no agent activity get autofailed before grading."""
 
@@ -1183,7 +1203,9 @@ class TestOrchestratorCallSurface:
             def variants(self):
                 return ["with-skill", "without-skill"]
 
-            def run(self, intent, variant, max_turns=10, cwd=None, docs_context="", timeout=60, extra_tools=None):
+            def run(
+                self, intent, variant, max_turns=10, cwd=None, docs_context="", timeout=60, extra_tools=None, model=None
+            ):
                 # Capture the cwd as it exists at agent-invocation time, before
                 # the orchestrator cleans up the tempdir.
                 assert cwd is not None, "run_local must pass a cwd to the runner"

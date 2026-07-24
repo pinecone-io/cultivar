@@ -45,6 +45,11 @@ parser.add_argument(
     default="",
     help="Comma-joined extra tool names to union into the variant's tool allow-list (task YAML's `extra_tools:` field), e.g. 'WebSearch,WebFetch'.",
 )
+parser.add_argument(
+    "--model",
+    default="",
+    help="Override the agent CLI's default model (cultivar run --model, orchestration-level, not a task field), e.g. 'claude-opus-5'.",
+)
 args = parser.parse_args()
 
 os.makedirs(args.cwd, exist_ok=True)
@@ -66,6 +71,7 @@ result = r.run(
     docs_context=docs_context,
     timeout=args.timeout,
     extra_tools=extra_tools,
+    model=args.model or None,
 )
 
 # Print as JSON to stdout — the orchestrator reads this

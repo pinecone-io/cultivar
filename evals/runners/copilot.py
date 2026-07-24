@@ -41,11 +41,14 @@ class CopilotRunner(Runner):
         max_turns: int = 10,
         docs_context: str = "",
         extra_tools: list[str] | None = None,
+        model: str | None = None,
     ) -> tuple[list[str], str]:
         # extra_tools (task YAML opt-in) has no matching mechanism here yet —
         # Copilot has no allow-list, only --excluded-tools, and its baseline
-        # already permits web access. Accepted for interface parity with
-        # ClaudeRunner; wire up real behavior if/when that changes.
+        # already permits web access. model (cultivar run --model override) isn't
+        # wired up either, though Copilot does have its own model flag — do that
+        # if/when Copilot is actually in scope for a model comparison. Both
+        # accepted for interface parity with ClaudeRunner.
         if variant == "with-skill" and self.skill_dir:
             skill_name = Path(self.skill_dir).name
             prompt = f"Use the /{skill_name} skill. {intent}" if skill_name else intent
@@ -82,8 +85,9 @@ class CopilotRunner(Runner):
         docs_context: str = "",
         timeout: int = 90,
         extra_tools: list[str] | None = None,
+        model: str | None = None,
     ) -> dict:
-        cmd, prompt = self.build_command(intent, variant, max_turns, docs_context, extra_tools)
+        cmd, prompt = self.build_command(intent, variant, max_turns, docs_context, extra_tools, model)
 
         try:
             stdout, stderr = run_cli(cmd, timeout=timeout, cwd=cwd)

@@ -45,11 +45,14 @@ class GeminiRunner(Runner):
         max_turns: int = 10,
         docs_context: str = "",
         extra_tools: list[str] | None = None,
+        model: str | None = None,
     ) -> tuple[list[str], str]:
         # extra_tools (task YAML opt-in) has no matching mechanism here yet —
-        # Gemini CLI has no --allowedTools-equivalent flag at all. Accepted for
-        # interface parity with ClaudeRunner; wire up real behavior if/when
-        # Gemini gains one.
+        # Gemini CLI has no --allowedTools-equivalent flag at all. model
+        # (cultivar run --model override) isn't wired up either, though Gemini
+        # does have its own -m/--model flag — do that if/when Gemini is in scope
+        # for a model comparison. Both accepted for interface parity with
+        # ClaudeRunner.
         if variant == "with-skill" and self.skill_dir:
             skill_name = Path(self.skill_dir).name
             prompt = f"Use the /{skill_name} skill. {intent}" if skill_name else intent
@@ -77,8 +80,9 @@ class GeminiRunner(Runner):
         docs_context: str = "",
         timeout: int = 90,
         extra_tools: list[str] | None = None,
+        model: str | None = None,
     ) -> dict:
-        cmd, prompt = self.build_command(intent, variant, max_turns, docs_context, extra_tools)
+        cmd, prompt = self.build_command(intent, variant, max_turns, docs_context, extra_tools, model)
 
         # For with-skill, link the skill and invoke via /skill-name.
         # For without-skill, run in a clean dir with no workspace skills.

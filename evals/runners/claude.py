@@ -20,6 +20,7 @@ class ClaudeRunner(Runner):
         max_turns: int = 10,
         docs_context: str = "",
         extra_tools: list[str] | None = None,
+        model: str | None = None,
     ) -> tuple[list[str], str]:
         if variant == "with-skill":
             skill_name = Path(self.skill_dir).name if self.skill_dir else ""
@@ -73,6 +74,11 @@ class ClaudeRunner(Runner):
 
         cmd.extend(["--allowedTools", ",".join(tools)])
 
+        # Orchestration-level override (`cultivar run --model <id>`), not a task
+        # field — lets the same task set re-run unmodified under a different model.
+        if model:
+            cmd.extend(["--model", model])
+
         return cmd, prompt
 
     def run(
@@ -84,8 +90,9 @@ class ClaudeRunner(Runner):
         docs_context: str = "",
         timeout: int = 90,
         extra_tools: list[str] | None = None,
+        model: str | None = None,
     ) -> dict:
-        cmd, prompt = self.build_command(intent, variant, max_turns, docs_context, extra_tools)
+        cmd, prompt = self.build_command(intent, variant, max_turns, docs_context, extra_tools, model)
 
         stdout, stderr = run_cli(cmd, timeout=timeout, cwd=cwd)
 
