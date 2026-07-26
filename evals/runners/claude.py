@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 from .base import Runner, run_cli
@@ -7,11 +8,18 @@ from .base import Runner, run_cli
 class ClaudeRunner(Runner):
     name = "claude"
 
-    def __init__(self, skill_dir: str | None = None):
+    def __init__(self, skill_dir: str | None = None, model: str = ""):
         self.skill_dir = skill_dir
+        self.model = model
 
     def variants(self) -> list[str]:
-        return ["with-skill", "without-skill", "with-docs"]
+        return [
+            "with-skill",
+            "without-skill",
+            "with-docs",
+            "with-docs-mcp",
+            "with-docs-fetch",
+        ]
 
     def build_command(
         self, intent: str, variant: str, max_turns: int = 10, docs_context: str = ""
@@ -21,6 +29,31 @@ class ClaudeRunner(Runner):
             prompt = f"Use the /{skill_name} skill. {intent}" if skill_name else intent
         elif variant == "with-docs":
             prompt = f"{docs_context}{intent}" if docs_context else intent
+        elif variant == "with-docs-mcp":
+            # Agent gets the docs assistant via the Pinecone MCP server's
+            # search-docs tool. The orchestrator is responsible for installing
+            # the MCP server and dropping an MCP config in the sandbox at the
+            # path indicated by SKILL_EVAL_MCP_CONFIG (defaults to
+            # /workspace/.mcp.json for the modal runner).
+            prompt = (
+                "You have access to the `search-docs` tool from the docs MCP server, "
+                "which searches the live documentation for the SDK you are working with. "
+                "Use it to look up anything you're not sure about (modern SDK patterns, "
+                "exact method names, API parameters). Then complete the task.\n\n"
+                f"{intent}"
+            )
+        elif variant == "with-docs-fetch":
+            # Agent fetches the live docs directly via WebFetch. We don't
+            # hardcode a base URL — the task intent should reference the docs
+            # site the agent should consult. (For Pinecone tasks: docs.pinecone.io.)
+            prompt = (
+                "You have access to the `WebFetch` tool. If the docs site for the "
+                "SDK you are working with has an `llms.txt` index of doc URLs, use "
+                "that as a starting point. Any page can usually be fetched as "
+                "markdown by appending `.md` to the URL. Look up modern SDK patterns, "
+                "exact method names, and API parameters as needed.\n\n"
+                f"{intent}"
+            )
         else:  # without-skill
             prompt = intent
 
@@ -34,6 +67,14 @@ class ClaudeRunner(Runner):
             "--max-turns",
             str(max_turns),
         ]
+
+        # Pin the agent model when set (e.g. claude-sonnet-5). Empty => CLI default.
+        if self.model:
+            cmd.extend(["--model", self.model])
+
+        if variant == "with-docs-mcp":
+            mcp_cfg = os.environ.get("SKILL_EVAL_MCP_CONFIG", "/workspace/.mcp.json")
+            cmd.extend(["--mcp-config", mcp_cfg])
 
         # --allowedTools takes a single comma-joined value; passing tools as
         # separate argv tokens silently drops everything after the first.
@@ -52,7 +93,14 @@ class ClaudeRunner(Runner):
         # re-enabling globally. A new variant ("bare-baseline") or a YAML
         # flag (`use_bare: true`) is the right shape; baking it into every
         # without-skill / with-docs run is what just bit us.
-        if variant in ("without-skill", "with-docs"):
+        if variant == "with-docs-mcp":
+            # Whitelist the search-docs MCP tool. The MCP server name is
+            # configured by the orchestrator's mcp config (default: pinecone-docs).
+            mcp_server_name = os.environ.get("SKILL_EVAL_MCP_SERVER_NAME", "pinecone-docs")
+            cmd.extend(["--allowedTools", f"Bash,Read,Write,Edit,mcp__{mcp_server_name}__search-docs"])
+        elif variant == "with-docs-fetch":
+            cmd.extend(["--allowedTools", "Bash,Read,Write,Edit,WebFetch"])
+        elif variant in ("without-skill", "with-docs"):
             cmd.extend(["--allowedTools", "Bash,Read,Write,Edit"])
         else:
             cmd.extend(["--allowedTools", "Bash,Read,Write,Edit,Skill,ToolSearch"])

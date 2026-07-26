@@ -40,6 +40,7 @@ parser.add_argument(
 parser.add_argument(
     "--timeout", type=int, default=90, help="Subprocess wall-clock budget in seconds for the agent CLI invocation."
 )
+parser.add_argument("--model", default="", help="Agent model id to pin (e.g. claude-sonnet-5). Empty uses the CLI default.")
 args = parser.parse_args()
 
 os.makedirs(args.cwd, exist_ok=True)
@@ -50,7 +51,11 @@ if args.docs_file:
         docs_context = f.read()
 
 runner_cls = RUNNERS[args.runner]
-r = runner_cls(skill_dir=args.skill_dir)
+# Only ClaudeRunner accepts a model kwarg today; keep copilot/gemini construction unchanged.
+if args.runner == "claude":
+    r = runner_cls(skill_dir=args.skill_dir, model=args.model)
+else:
+    r = runner_cls(skill_dir=args.skill_dir)
 result = r.run(
     args.intent,
     args.variant,

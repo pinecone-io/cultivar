@@ -8,6 +8,7 @@ unchanged inside the sandbox via entry.py.
 import json
 import os
 import time
+import uuid
 from pathlib import Path
 
 import modal
@@ -29,10 +30,13 @@ eval_image = (
         "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -",
         "apt-get install -y nodejs",
     )
-    .run_commands("npm install -g @anthropic-ai/claude-code @google/gemini-cli @github/copilot")
+    .run_commands(
+        "npm install -g @anthropic-ai/claude-code @google/gemini-cli @github/copilot @pinecone-database/mcp"
+    )
     .pip_install("pyyaml")
     .add_local_dir(str(EVALS_DIR / "runners"), remote_path="/workspace/evals/runners")
     .add_local_file(str(EVALS_DIR / "remote" / "entry.py"), remote_path="/workspace/evals/remote/entry.py")
+    .add_local_file(str(EVALS_DIR / "remote" / "eval_isolate.py"), remote_path="/workspace/evals/remote/eval_isolate.py")
 )
 
 app = modal.App.lookup(_MODAL_APP_NAME, create_if_missing=True)
@@ -40,7 +44,10 @@ app = modal.App.lookup(_MODAL_APP_NAME, create_if_missing=True)
 # Wall-clock budget the sandbox itself gets, on top of the agent's per-call
 # timeout. The buffer covers image cold-start, setup, verify, teardown, and
 # workdir extraction — everything the sandbox does outside the agent run.
-SANDBOX_BUFFER_S = 60
+# Raised from 60s: execution-based verify actually runs the generated code
+# (real Pinecone index create + ready-poll + upsert + queries), which can take
+# a few minutes. Override with SKILL_EVAL_SANDBOX_BUFFER_S.
+SANDBOX_BUFFER_S = int(os.environ.get("SKILL_EVAL_SANDBOX_BUFFER_S", "360"))
 
 
 def run_one_remote(
@@ -56,9 +63,23 @@ def run_one_remote(
     workdir_src: str = "/workspace/app",
     docs_context: str = "",
     timeout: int = 90,
+    model: str = "",
 ) -> dict:
     """Run a single eval task in a Modal sandbox. Returns the runner result dict."""
     secrets = [modal.Secret.from_name(SECRET_NAME)]
+    # The named eval-sandbox-secrets covers the agent CLI (ANTHROPIC_API_KEY).
+    # Execution-based `verify` runs the agent's generated code against the real
+    # service, so the sandbox also needs the data-plane keys. Inject whichever
+    # are present in the local env (loaded from .env) as an ephemeral, run-scoped
+    # secret — NOT persisted as a named Modal secret.
+    _extra: dict[str, str | None] = {
+        k: os.environ[k] for k in ("PINECONE_API_KEY", "COHERE_API_KEY", "OPENAI_API_KEY") if os.environ.get(k)
+    }
+    # Per-run index-name prefix: lets parallel runs share one Pinecone project
+    # without colliding on the hard-coded index names in the generated code.
+    # eval_isolate.apply()/teardown() read this from the sandbox env.
+    _extra["EVAL_IDX_PREFIX"] = "ev" + uuid.uuid4().hex[:6] + "-"
+    secrets.append(modal.Secret.from_dict(_extra))
     image = eval_image
 
     # Bake skill files into the image if needed
@@ -115,6 +136,21 @@ def run_one_remote(
             with sb.open(docs_file_remote, "wb") as f:
                 f.write(docs_context.encode("utf-8"))
 
+        # with-docs-mcp variant: write an MCP config the agent's CLI can load.
+        # The Pinecone MCP server is installed in the image; PINECONE_API_KEY
+        # comes from the sandbox secret.
+        if variant == "with-docs-mcp":
+            mcp_config = {
+                "mcpServers": {
+                    "pinecone-docs": {
+                        "command": "pinecone-mcp",
+                        "args": [],
+                    }
+                }
+            }
+            with sb.open("/workspace/.mcp.json", "wb") as f:
+                f.write(json.dumps(mcp_config).encode("utf-8"))
+
         # Run the eval via entry.py
         cmd_args = [
             "python3",
@@ -134,6 +170,8 @@ def run_one_remote(
             "--timeout",
             str(timeout),
         ]
+        if model:
+            cmd_args.extend(["--model", model])
         if docs_file_remote:
             cmd_args.extend(["--docs-file", docs_file_remote])
         p = sb.exec(*cmd_args)

@@ -140,6 +140,57 @@ def load_workdir_files(workdir: Path) -> str:
     return out
 
 
+def _fetch_url_ref(ref: str, cap: int) -> str | None:
+    """Fetch a remote doc page for a URL context_ref, cached locally.
+
+    URL refs (e.g. https://docs.pinecone.io/...) used to be silently skipped,
+    which left the with-docs variant and the grader's ground truth EMPTY for
+    those tasks — making the "live docs" comparison meaningless. We fetch the
+    page (trying the Mintlify raw-markdown `.md` form first, then the HTML page
+    with a crude tag-strip), cache it under ./.docs_cache, and return text.
+    Returns None on failure so the caller can warn-and-skip.
+    """
+    import hashlib
+    import urllib.request
+
+    cache_dir = Path.cwd() / ".docs_cache"
+    try:
+        cache_dir.mkdir(exist_ok=True)
+        cf = cache_dir / (hashlib.sha1(ref.encode()).hexdigest() + ".txt")
+        if cf.is_file():
+            return cf.read_text(errors="replace")
+    except Exception:
+        cf = None
+
+    candidates = [ref] if ref.endswith(".md") else [ref + ".md", ref]
+    for url in candidates:
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "skill-eval-docs/1.0", "Accept": "text/markdown,text/plain,text/html"},
+            )
+            with urllib.request.urlopen(req, timeout=20) as r:
+                raw = r.read().decode("utf-8", errors="replace")
+        except Exception:
+            continue
+        head = raw[:2000].lower()
+        text = raw
+        if "<!doctype html" in head or "<html" in head:
+            text = re.sub(r"(?is)<(script|style|nav|header|footer|svg)\b.*?</\1>", " ", raw)
+            text = re.sub(r"(?s)<[^>]+>", " ", text)
+            text = re.sub(r"[ \t]{2,}", " ", text)
+            text = re.sub(r"\n\s*\n\s*\n+", "\n\n", text)
+        text = text.strip()[:cap]
+        if text:
+            if cf is not None:
+                try:
+                    cf.write_text(text)
+                except Exception:
+                    pass
+            return text
+    return None
+
+
 def _resolve_refs_body(refs: list[str], cap: int = CONTEXT_REFS_CAP_BYTES) -> tuple[str, int]:
     """Read each ref, render as fenced markdown sections, capped at `cap` bytes total.
 
@@ -156,6 +207,23 @@ def _resolve_refs_body(refs: list[str], cap: int = CONTEXT_REFS_CAP_BYTES) -> tu
     skipped_capped = 0
 
     for ref in refs:
+        if ref.startswith(("http://", "https://")):
+            content = _fetch_url_ref(ref, remaining)
+            if not content:
+                console.print(f"[yellow]Warning: could not fetch context_ref URL, skipping: {ref}[/yellow]")
+                continue
+            header = f"\n### {ref}\n```markdown\n"
+            footer = "\n```\n"
+            budget = remaining - len(header) - len(footer)
+            if budget <= 0:
+                skipped_capped += 1
+                continue
+            if len(content) > budget:
+                content = content[:budget] + "\n... (truncated)"
+                skipped_capped += 1
+            parts.append(header + content + footer)
+            remaining -= len(header) + len(content) + len(footer)
+            continue
         p = Path(ref)
         if not p.is_absolute():
             p = Path.cwd() / ref
@@ -277,6 +345,8 @@ def build_grader_prompt(
     verify_output: str = "",
     workdir_content: str = "",
     refs_content: str = "",
+    verify_exit_code: int | None = None,
+    verify_stderr: str = "",
 ) -> str:
     gt = task.get("ground_truth", {})
     criteria = gt.get("criteria", "")
@@ -334,7 +404,27 @@ def build_grader_prompt(
         ]
     )
 
-    if verify_output:
+    if verify_exit_code is not None:
+        # Execution-based verification ran: the agent's generated code was actually
+        # executed against the real service. This is the authoritative signal.
+        status = "PASSED (exit 0)" if verify_exit_code == 0 else f"FAILED (exit {verify_exit_code})"
+        parts.extend(
+            [
+                "## Verification Output (EXECUTION — AUTHORITATIVE)",
+                "The agent's generated code was EXECUTED after the run against the real service. "
+                "This is the authoritative signal. If execution FAILED, the task FAILS regardless "
+                "of how the code reads on the page. If execution PASSED, the code runs — but still "
+                "confirm it used the specific API the criteria require (e.g. the documents/FTS API, "
+                "not a sparse-vector fallback) before passing.",
+                f"Execution result: {status}",
+            ]
+        )
+        if verify_output:
+            parts.append(f"stdout:\n```\n{verify_output[:4000]}\n```")
+        if verify_stderr:
+            parts.append(f"stderr:\n```\n{verify_stderr[:2000]}\n```")
+        parts.append("")
+    elif verify_output:
         parts.extend(
             [
                 "## Verification Output",
@@ -467,13 +557,46 @@ def grade_one(
             ],
         }
 
+    # Execution-based verification is authoritative. When a task ran a `verify`
+    # command (execution check) and it exited non-zero, the generated code did
+    # not actually run against the real service — autofail without asking the
+    # judge, which would otherwise pass plausible-but-broken code. Tasks with no
+    # verify command have verify_exit_code == None and fall through to the judge
+    # (the hybrid-grading path for tasks we can't execute end-to-end).
+    verify_exit_code = conversation.get("verify_exit_code")
+    verify_output = conversation.get("verify_output", "")
+    verify_stderr = conversation.get("verify_stderr", "")
+    if verify_exit_code is not None and verify_exit_code != 0:
+        return {
+            "pass": False,
+            "proposed_command": "",
+            "evidence": (verify_stderr or verify_output or "")[:500],
+            "reasoning": (
+                f"Execution check failed: the generated code exited {verify_exit_code} when run "
+                "against the real service. Code that does not execute fails regardless of how it reads."
+            ),
+            "suggestions": [
+                {
+                    "cause": "Generated code raised at runtime (wrong API surface, bad params, or missing setup).",
+                    "fix": "Read the verify stderr; fix the failing call. Common cause here: using an API shape that doesn't exist in the installed SDK.",
+                }
+            ],
+        }
+
     if len(conv_str) > 50000:
         conv_str = conv_str[:50000] + "\n... (truncated)"
 
-    verify_output = conversation.get("verify_output", "")
     refs_content = load_context_refs(task.get("ground_truth", {}).get("context_refs", []))
     prompt = build_grader_prompt(
-        task, conv_str, examples_block, skill_content, verify_output, workdir_content, refs_content
+        task,
+        conv_str,
+        examples_block,
+        skill_content,
+        verify_output,
+        workdir_content,
+        refs_content,
+        verify_exit_code=verify_exit_code,
+        verify_stderr=verify_stderr,
     )
 
     response = client.messages.create(
