@@ -72,7 +72,7 @@ def run_one_remote(
     # service, so the sandbox also needs the data-plane keys. Inject whichever
     # are present in the local env (loaded from .env) as an ephemeral, run-scoped
     # secret — NOT persisted as a named Modal secret.
-    _extra = {
+    _extra: dict[str, str | None] = {
         k: os.environ[k] for k in ("PINECONE_API_KEY", "COHERE_API_KEY", "OPENAI_API_KEY") if os.environ.get(k)
     }
     # Per-run index-name prefix: lets parallel runs share one Pinecone project
