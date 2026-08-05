@@ -13,13 +13,13 @@ from pathlib import Path
 import typer
 import yaml
 
-from evals.framework.reporting import resolve_skills_base
+from evals.framework.reporting import resolve_results_base, resolve_skills_base
 from evals.runners.claude import ClaudeRunner
 from evals.runners.copilot import CopilotRunner
 from evals.runners.gemini import GeminiRunner
 
 TASKS_DIR = Path.cwd() / "tasks"
-RESULTS_DIR = Path.cwd() / "results"
+RESULTS_DIR = resolve_results_base()
 
 RUNNER_CLASSES = {
     "claude": ClaudeRunner,
@@ -426,6 +426,14 @@ def main(
     grade: bool = typer.Option(
         False, "--grade", help="After runs finish, invoke the grader and print a report. Requires ANTHROPIC_API_KEY."
     ),
+    fail_under: float | None = typer.Option(
+        None,
+        "--fail-under",
+        help=(
+            "With --grade, exit 1 if the with-skill pass rate is below this percentage (0-100). "
+            "Omit to always exit 0. Intended for CI gates."
+        ),
+    ),
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
@@ -556,9 +564,14 @@ def main(
 
     if grade:
         typer.echo("\nGrading...")
-        subprocess.run(
-            [sys.executable, "-m", "evals.cli", "grade", str(run_dir), "--skill", skill, "--report"],
-        )
+        cmd = [sys.executable, "-m", "evals.cli", "grade", str(run_dir), "--skill", skill, "--report"]
+        if fail_under is not None:
+            cmd += ["--fail-under", str(fail_under)]
+        result = subprocess.run(cmd)
+        # Propagate the child's status. Previously discarded, which meant a failing
+        # gate — or a crashed grader — still exited 0 and a CI job went green.
+        if result.returncode != 0:
+            raise typer.Exit(result.returncode)
     else:
         typer.echo("\nTo grade and view report:")
         typer.echo(f"  cultivar grade {run_dir} --report")

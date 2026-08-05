@@ -49,10 +49,66 @@ def _new_variant_stats() -> _VariantStats:
     }
 
 
+def resolve_results_base() -> Path:
+    """Resolve the results root directory (the dir that holds one subdir per run).
+
+    Precedence: ``CULTIVAR_RESULTS_DIR`` env var > ``./results``. Relative values are
+    anchored to the current working directory. Mirrors :func:`resolve_skills_base`.
+
+    CI needs this: results are written per-run and are large, so a job can point them
+    at ``$RUNNER_TEMP`` instead of the checkout and upload only ``grades.json``.
+    """
+    raw = os.environ.get("CULTIVAR_RESULTS_DIR") or ""
+    if raw:
+        p = Path(raw)
+        return p if p.is_absolute() else Path.cwd() / p
+    return Path.cwd() / "results"
+
+
+def gate_pass_rate(grades: list[dict], variant: str = "with-skill") -> tuple[float, int, int]:
+    """Pass rate for one variant, as a percentage, plus (passed, total) counts.
+
+    Only ``variant`` is counted. The gate deliberately ignores ``without-skill``: it is
+    the baseline and is *expected* to fail, so including it would make any threshold
+    meaningless. Returns ``(0.0, 0, 0)`` when the variant produced no grades — callers
+    treat an empty result set as a failure rather than a vacuous pass.
+    """
+    rows = [g for g in grades if g.get("variant") == variant]
+    total = len(rows)
+    passed = sum(1 for g in rows if g.get("pass"))
+    rate = (passed / total * 100) if total else 0.0
+    return rate, passed, total
+
+
+def gate_verdict(
+    grades: list[dict], threshold: float, variant: str = "with-skill"
+) -> tuple[bool, str]:
+    """Decide whether a graded run clears the CI threshold.
+
+    Returns ``(ok, message)``. Kept separate from the CLI so the decision is pure and
+    testable — the caller does the printing and the exit.
+
+    An empty result set is a **failure**, not a vacuous pass: a run that produced no
+    ``variant`` grades at all usually means the runner or the task filter broke, and
+    that must not read as green.
+    """
+    rate, passed, total = gate_pass_rate(grades, variant)
+    if total == 0:
+        return False, f"no {variant} grades to measure"
+    summary = f"{variant} pass rate {rate:.1f}% ({passed}/{total}), threshold {threshold:.1f}%"
+    return rate >= threshold, summary
+
+
 def resolve_results_dir(results_dir: str | None) -> Path:
-    results_root = Path.cwd() / "results"
+    results_root = resolve_results_base()
     if results_dir and results_dir != "latest":
         return Path(results_dir)
+
+    if not results_root.is_dir():
+        # Reachable whenever CULTIVAR_RESULTS_DIR points somewhere that does not exist
+        # yet; without this guard iterdir() raises a bare FileNotFoundError.
+        console.print(f"[red]No results directory at {results_root}.[/red]")
+        raise typer.Exit(1)
 
     dirs = sorted(
         [d for d in results_root.iterdir() if d.is_dir() and d.name[0:4].isdigit()],
