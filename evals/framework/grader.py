@@ -11,7 +11,13 @@ import yaml
 from anthropic import Anthropic
 from anthropic.types import TextBlock
 
-from evals.framework.reporting import console, print_report, resolve_results_dir, resolve_skills_base
+from evals.framework.reporting import (
+    console,
+    gate_verdict,
+    print_report,
+    resolve_results_dir,
+    resolve_skills_base,
+)
 
 
 def _require_anthropic_key() -> None:
@@ -586,6 +592,17 @@ def main(
     skills_dir: str = typer.Option(
         "", "--skills-dir", help="Skills root dir. Overrides CULTIVAR_SKILLS_DIR env; default ./.claude/skills."
     ),
+    fail_under: float | None = typer.Option(
+        None,
+        "--fail-under",
+        help=(
+            "Exit 1 if the with-skill pass rate is below this percentage (0-100). "
+            "Omit to always exit 0. Intended for CI gates."
+        ),
+    ),
+    gate_variant: str = typer.Option(
+        "with-skill", "--gate-variant", help="Variant that --fail-under measures. Default: with-skill."
+    ),
 ):
     """Grade an existing results dir with the LLM grader; writes grades.json and prints a report.
 
@@ -599,6 +616,7 @@ def main(
       cultivar grade results/2026-04-22T11-31-47__baseline   # grade a specific run
       cultivar grade latest --model claude-sonnet-4-6        # use a stronger grader
       cultivar grade latest --no-report                      # write grades.json, skip the report
+      cultivar grade latest --fail-under 80                  # exit 1 if with-skill pass rate < 80%
 
     See docs/grader.md for prompt structure and calibration tips.
     """
@@ -741,6 +759,15 @@ def main(
         if notes_file.exists():
             notes = notes_file.read_text()
         print_report(grades, notes)
+
+    # CI gate. Nothing above this line exits nonzero on a bad result, so without
+    # --fail-under a failing eval still reports success to the caller.
+    if fail_under is not None:
+        ok, summary = gate_verdict(grades, fail_under, gate_variant)
+        if not ok:
+            console.print(f"[red]Gate failed: {summary}[/red]")
+            raise typer.Exit(1)
+        console.print(f"[green]Gate passed: {summary}[/green]")
 
 
 if __name__ == "__main__":

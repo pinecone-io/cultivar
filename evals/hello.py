@@ -18,7 +18,7 @@ import typer
 import yaml
 from rich.table import Table
 
-from evals.framework.reporting import console
+from evals.framework.reporting import console, resolve_results_base
 from evals.run import RUNNER_CLASSES, run_local, run_remote
 
 app = typer.Typer(pretty_exceptions_enable=False)
@@ -186,7 +186,7 @@ def main(
             variants = valid_variants
 
         run_id = datetime.now().strftime("%Y-%m-%dT%H-%M-%S") + "__hello"
-        run_dir = Path.cwd() / "results" / run_id
+        run_dir = resolve_results_base() / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
 
         with open(run_dir / "tasks.json", "w") as f:

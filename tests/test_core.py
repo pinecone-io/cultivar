@@ -1213,3 +1213,158 @@ class TestResolveSkillsBase:
         monkeypatch.chdir(tmp_path)
         abs_dir = tmp_path / "elsewhere" / "skills"
         assert self.resolve(str(abs_dir)) == abs_dir
+
+
+# ---------------------------------------------------------------------------
+# CI gate — results dir resolution, pass-rate math, and the threshold verdict
+# ---------------------------------------------------------------------------
+
+
+class TestResolveResultsBase:
+    """CI points results at $RUNNER_TEMP; getting this wrong writes into the checkout."""
+
+    @staticmethod
+    def resolve():
+        from evals.framework.reporting import resolve_results_base
+
+        return resolve_results_base()
+
+    def test_defaults_to_cwd_results(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CULTIVAR_RESULTS_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        assert self.resolve() == tmp_path / "results"
+
+    def test_env_var_overrides_default(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CULTIVAR_RESULTS_DIR", "out")
+        monkeypatch.chdir(tmp_path)
+        assert self.resolve() == tmp_path / "out"
+
+    def test_absolute_env_value_preserved(self, tmp_path, monkeypatch):
+        elsewhere = tmp_path / "elsewhere" / "out"
+        monkeypatch.setenv("CULTIVAR_RESULTS_DIR", str(elsewhere))
+        monkeypatch.chdir(tmp_path)
+        assert self.resolve() == elsewhere
+
+
+def _grades(*specs):
+    """Build minimal grade rows: each spec is (variant, passed)."""
+    return [
+        {"pass": ok, "variant": v, "task_id": f"t{i}", "runner": "claude", "run_num": 1}
+        for i, (v, ok) in enumerate(specs)
+    ]
+
+
+class TestGatePassRate:
+    """The baseline variant is expected to fail; letting it into the denominator
+    would make every threshold meaningless."""
+
+    @staticmethod
+    def rate(grades, variant="with-skill"):
+        from evals.framework.reporting import gate_pass_rate
+
+        return gate_pass_rate(grades, variant)
+
+    def test_counts_only_the_named_variant(self):
+        g = _grades(
+            ("with-skill", True),
+            ("with-skill", True),
+            ("with-skill", False),
+            ("without-skill", False),
+            ("without-skill", False),
+        )
+        rate, passed, total = self.rate(g)
+        assert (passed, total) == (2, 3)
+        assert rate == pytest.approx(66.67, abs=0.01)
+
+    def test_naive_overall_rate_would_differ(self):
+        """Guards the whole point of the variant filter: 2/5 != 2/3."""
+        g = _grades(
+            ("with-skill", True),
+            ("with-skill", True),
+            ("with-skill", False),
+            ("without-skill", False),
+            ("without-skill", False),
+        )
+        assert self.rate(g)[0] != pytest.approx(40.0)
+
+    def test_all_passing_is_one_hundred(self):
+        assert self.rate(_grades(("with-skill", True), ("with-skill", True)))[0] == 100.0
+
+    def test_empty_variant_yields_zero_not_crash(self):
+        assert self.rate(_grades(("without-skill", True))) == (0.0, 0, 0)
+
+    def test_other_variant_selectable(self):
+        g = _grades(("with-docs", True), ("with-docs", False))
+        assert self.rate(g, "with-docs") == (50.0, 1, 2)
+
+
+class TestGateVerdict:
+    """Exit-code decision. Before this existed, a failing eval still exited 0."""
+
+    @staticmethod
+    def verdict(grades, threshold, variant="with-skill"):
+        from evals.framework.reporting import gate_verdict
+
+        return gate_verdict(grades, threshold, variant)
+
+    def test_above_threshold_passes(self):
+        ok, msg = self.verdict(_grades(("with-skill", True), ("with-skill", True)), 80.0)
+        assert ok
+        assert "100.0%" in msg
+
+    def test_below_threshold_fails(self):
+        ok, msg = self.verdict(_grades(("with-skill", True), ("with-skill", False)), 80.0)
+        assert not ok
+        assert "50.0%" in msg and "80.0%" in msg
+
+    def test_exactly_at_threshold_passes(self):
+        """>= not >, so --fail-under 50 on a 50% run is green."""
+        ok, _ = self.verdict(_grades(("with-skill", True), ("with-skill", False)), 50.0)
+        assert ok
+
+    def test_no_grades_fails_rather_than_vacuously_passing(self):
+        ok, msg = self.verdict([], 0.0)
+        assert not ok
+        assert "no with-skill grades" in msg
+
+    def test_baseline_only_run_fails(self):
+        """A run where the with-skill variant never executed must not read as green."""
+        ok, _ = self.verdict(_grades(("without-skill", True)), 0.0)
+        assert not ok
+
+
+class TestReportFormats:
+    """md/json are consumed by CI, so their shape is a contract."""
+
+    @staticmethod
+    def summarize(grades):
+        from evals.framework.report import _summarize
+
+        return _summarize(grades)
+
+    def test_json_summary_shape(self):
+        s = self.summarize(_grades(("with-skill", True), ("with-skill", False)))
+        assert s["total_conversations"] == 2
+        assert s["variants"]["with-skill"] == {"pass_rate": 50.0, "passed": 1, "total": 2}
+        assert len(s["failures"]) == 1
+
+    def test_variants_ordered_predictably(self):
+        s = self.summarize(_grades(("without-skill", False), ("with-skill", True)))
+        assert list(s["variants"]) == ["with-skill", "without-skill"]
+
+    def test_unknown_variant_still_reported(self):
+        s = self.summarize(_grades(("with-skill", True), ("custom", False)))
+        assert "custom" in s["variants"]
+
+    def test_md_renders_table_and_failures(self):
+        from evals.framework.report import _render_md
+
+        md = _render_md(_grades(("with-skill", False)), "run-x")
+        assert "run-x" in md
+        assert "| `with-skill` | 0.0% | 0 | 1 |" in md
+        assert "1 failure(s)" in md
+
+    def test_md_says_no_failures_when_clean(self):
+        from evals.framework.report import _render_md
+
+        assert "No failures." in _render_md(_grades(("with-skill", True)), "run-y")
