@@ -23,10 +23,15 @@ claude -p "<prompt>" \
   --output-format stream-json \
   --verbose \
   --max-turns <N> \
-  --allowedTools <comma-joined tools>
+  --allowedTools <comma-joined tools> \
+  [--model <model>]
 ```
 
 `--verbose` is required to get the stream-json event stream in `-p` (headless) mode. `--max-turns` defaults to 10; the per-call wall-clock budget is the orchestrator's `--timeout` (default 90s). Remote sandboxes get `--timeout` plus a 60s buffer for everything outside the agent run (cold-start, setup, verify, teardown, workdir extraction).
+
+`--model` is appended only when `cultivar run --model` is set; without it the CLI uses whatever the account's headless default is. Pin it for any comparison run — an unpinned default that shifts between batches reads as a behavioural finding when it's really just a different model.
+
+Two unrelated flags share the name: `cultivar run --model` picks the **agent** model (this one, Claude-only — the other runners accept and ignore it), while `cultivar grade --model` picks the **grader** model (see [grader.md](../grader.md)).
 
 `--allowedTools` takes a **single comma-joined value** (e.g. `Bash,Read,Write,Edit`). Passing tools as separate argv tokens silently drops everything after the first.
 
@@ -38,6 +43,8 @@ claude -p "<prompt>" \
 | `--allowedTools` | `Bash,Read,Write,Edit,Skill,ToolSearch` | `Bash,Read,Write,Edit` | `Bash,Read,Write,Edit` |
 
 The baseline variants drop `Skill` and `ToolSearch` from `--allowedTools` — there's no mounted skill to invoke, so the tools have nothing to act on. This is the one flag that differs between with-skill and the baselines; everything else (model, turn cap, timeout, output format) is identical.
+
+A task's [`extra_tools`](../task-yaml.md) list is unioned into whichever variant's allow-list applies, de-duplicated. That's how a `without-skill` baseline gets `WebSearch`/`WebFetch` — the table's values are the floor, not a fixed set. It's a per-task opt-in rather than a global default, since most tasks don't want the extra surface.
 
 The with-docs prompt is just `f"{docs_context}{intent}"` — the runner concatenates, nothing more. The `docs_context` prefix is built by `load_runner_refs` (`evals/framework/grader.py`), which wraps the `context_refs` in a framing preamble ("Reference these documents…") and appends a `\n---\n\n` divider before the intent. So the divider comes from the grader's ref-loader, not the runner.
 
