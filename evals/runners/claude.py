@@ -14,7 +14,13 @@ class ClaudeRunner(Runner):
         return ["with-skill", "without-skill", "with-docs"]
 
     def build_command(
-        self, intent: str, variant: str, max_turns: int = 10, docs_context: str = ""
+        self,
+        intent: str,
+        variant: str,
+        max_turns: int = 10,
+        docs_context: str = "",
+        extra_tools: list[str] | None = None,
+        model: str | None = None,
     ) -> tuple[list[str], str]:
         if variant == "with-skill":
             skill_name = Path(self.skill_dir).name if self.skill_dir else ""
@@ -53,9 +59,25 @@ class ClaudeRunner(Runner):
         # flag (`use_bare: true`) is the right shape; baking it into every
         # without-skill / with-docs run is what just bit us.
         if variant in ("without-skill", "with-docs"):
-            cmd.extend(["--allowedTools", "Bash,Read,Write,Edit"])
+            tools = ["Bash", "Read", "Write", "Edit"]
         else:
-            cmd.extend(["--allowedTools", "Bash,Read,Write,Edit,Skill,ToolSearch"])
+            tools = ["Bash", "Read", "Write", "Edit", "Skill", "ToolSearch"]
+
+        # extra_tools is a per-task opt-in (task YAML's `extra_tools:` field) —
+        # e.g. ["WebSearch", "WebFetch"] so a without-skill baseline can search
+        # the web. Unioned in rather than defaulted on for every run so we don't
+        # repeat the --bare mistake above (see NOTE): capability changes stay
+        # scoped to the tasks that ask for them.
+        for t in extra_tools or []:
+            if t not in tools:
+                tools.append(t)
+
+        cmd.extend(["--allowedTools", ",".join(tools)])
+
+        # Orchestration-level override (`cultivar run --model <id>`), not a task
+        # field — lets the same task set re-run unmodified under a different model.
+        if model:
+            cmd.extend(["--model", model])
 
         return cmd, prompt
 
@@ -67,8 +89,10 @@ class ClaudeRunner(Runner):
         cwd: str | None = None,
         docs_context: str = "",
         timeout: int = 90,
+        extra_tools: list[str] | None = None,
+        model: str | None = None,
     ) -> dict:
-        cmd, prompt = self.build_command(intent, variant, max_turns, docs_context)
+        cmd, prompt = self.build_command(intent, variant, max_turns, docs_context, extra_tools, model)
 
         stdout, stderr = run_cli(cmd, timeout=timeout, cwd=cwd)
 
@@ -115,6 +139,10 @@ class ClaudeRunner(Runner):
                             md.append(f"**Read:** `{inp.get('file_path', '')}`\n")
                         elif name == "ToolSearch":
                             md.append(f"**ToolSearch:** `{inp.get('query', '')}`\n")
+                        elif name == "WebSearch":
+                            md.append(f"**WebSearch:** `{inp.get('query', '')}`\n")
+                        elif name == "WebFetch":
+                            md.append(f"**WebFetch:** `{inp.get('url', '')}`\n")
                         else:
                             md.append(f"**{name}:** `{json.dumps(inp)[:200]}`\n")
 

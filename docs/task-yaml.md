@@ -26,6 +26,7 @@ That's it. No version, no metadata. The list under `tasks:` is what gets loaded.
 | `teardown` | no | string (shell) | Runs after the agent (and after `verify`). Same exec context as `setup`. |
 | `verify` | no | string (shell) | Runs after the agent. Stdout is captured into `result.verify_output` and **fed to the grader** under "Verification Output". Use this to check post-run state (e.g. `pc index stats my-test-index`). |
 | `env` | no | list of strings | Required env vars. Preflight checks each name is set; missing keys abort before any runs. |
+| `extra_tools` | no | list of strings | Tool names unioned into the variant's tool allow-list, e.g. `[WebSearch, WebFetch]` so a without-skill baseline can search/fetch the web. Per-task opt-in, not a global default. Claude-only for now; other runners accept and ignore it (see their docstrings). |
 | `ground_truth` | no | object | Grader rubric — see below. Without it, grading is unreliable. |
 
 ### `ground_truth` sub-fields

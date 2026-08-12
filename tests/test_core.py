@@ -921,6 +921,69 @@ class TestRunnerWithDocsPrompt:
             assert "with-docs" in cls(skill_dir=None).variants()
 
 
+class TestExtraTools:
+    """extra_tools (task YAML opt-in) unions into the variant's --allowedTools."""
+
+    def test_claude_without_skill_unions_extra_tools(self):
+        from evals.runners.claude import ClaudeRunner
+
+        r = ClaudeRunner(skill_dir="/tmp/fake-skill")
+        cmd, _ = r.build_command(
+            "do the thing", "without-skill", max_turns=5, extra_tools=["WebSearch", "WebFetch"]
+        )
+        tools = cmd[cmd.index("--allowedTools") + 1].split(",")
+        assert {"Bash", "Read", "Write", "Edit", "WebSearch", "WebFetch"}.issubset(set(tools))
+
+    def test_claude_extra_tools_none_is_unchanged(self):
+        """Omitting extra_tools must not change the existing allow-list."""
+        from evals.runners.claude import ClaudeRunner
+
+        r = ClaudeRunner(skill_dir="/tmp/fake-skill")
+        cmd, _ = r.build_command("do the thing", "without-skill", max_turns=5)
+        tools = set(cmd[cmd.index("--allowedTools") + 1].split(","))
+        assert tools == {"Bash", "Read", "Write", "Edit"}
+
+    def test_claude_extra_tools_no_duplicates(self):
+        """Requesting a tool that's already in the base list doesn't duplicate it."""
+        from evals.runners.claude import ClaudeRunner
+
+        r = ClaudeRunner(skill_dir="/tmp/fake-skill")
+        cmd, _ = r.build_command("do the thing", "without-skill", max_turns=5, extra_tools=["Bash", "WebSearch"])
+        tools = cmd[cmd.index("--allowedTools") + 1].split(",")
+        assert tools.count("Bash") == 1
+        assert "WebSearch" in tools
+
+    def test_copilot_and_gemini_accept_and_ignore_extra_tools(self):
+        """No matching mechanism yet on these runners — must not raise."""
+        from evals.runners.copilot import CopilotRunner
+        from evals.runners.gemini import GeminiRunner
+
+        for cls in (CopilotRunner, GeminiRunner):
+            r = cls(skill_dir="/tmp/fake-skill")
+            cmd, _ = r.build_command("do the thing", "without-skill", max_turns=5, extra_tools=["WebSearch"])
+            assert isinstance(cmd, list)
+
+
+class TestModelOverride:
+    """model (cultivar run --model, orchestration-level) appends --model to the Claude command."""
+
+    def test_claude_model_appends_flag(self):
+        from evals.runners.claude import ClaudeRunner
+
+        r = ClaudeRunner(skill_dir="/tmp/fake-skill")
+        cmd, _ = r.build_command("do the thing", "without-skill", max_turns=5, model="claude-opus-5")
+        idx = cmd.index("--model")
+        assert cmd[idx + 1] == "claude-opus-5"
+
+    def test_claude_model_none_omits_flag(self):
+        """Omitting model must not add --model at all (uses the CLI's own default)."""
+        from evals.runners.claude import ClaudeRunner
+
+        r = ClaudeRunner(skill_dir="/tmp/fake-skill")
+        cmd, _ = r.build_command("do the thing", "without-skill", max_turns=5)
+        assert "--model" not in cmd
+
+
 class TestEmptyTraceAutofail:
     """_has_agent_signal: traces with no agent activity get autofailed before grading."""
 
@@ -1140,7 +1203,9 @@ class TestOrchestratorCallSurface:
             def variants(self):
                 return ["with-skill", "without-skill"]
 
-            def run(self, intent, variant, max_turns=10, cwd=None, docs_context="", timeout=60):
+            def run(
+                self, intent, variant, max_turns=10, cwd=None, docs_context="", timeout=60, extra_tools=None, model=None
+            ):
                 # Capture the cwd as it exists at agent-invocation time, before
                 # the orchestrator cleans up the tempdir.
                 assert cwd is not None, "run_local must pass a cwd to the runner"

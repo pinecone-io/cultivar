@@ -40,6 +40,16 @@ parser.add_argument(
 parser.add_argument(
     "--timeout", type=int, default=90, help="Subprocess wall-clock budget in seconds for the agent CLI invocation."
 )
+parser.add_argument(
+    "--extra-tools",
+    default="",
+    help="Comma-joined extra tool names to union into the variant's tool allow-list (task YAML's `extra_tools:` field), e.g. 'WebSearch,WebFetch'.",
+)
+parser.add_argument(
+    "--model",
+    default="",
+    help="Override the agent CLI's default model (cultivar run --model, orchestration-level, not a task field), e.g. 'claude-opus-5'.",
+)
 args = parser.parse_args()
 
 os.makedirs(args.cwd, exist_ok=True)
@@ -48,6 +58,8 @@ docs_context = ""
 if args.docs_file:
     with open(args.docs_file) as f:
         docs_context = f.read()
+
+extra_tools = [t for t in args.extra_tools.split(",") if t] if args.extra_tools else []
 
 runner_cls = RUNNERS[args.runner]
 r = runner_cls(skill_dir=args.skill_dir)
@@ -58,6 +70,8 @@ result = r.run(
     cwd=args.cwd,
     docs_context=docs_context,
     timeout=args.timeout,
+    extra_tools=extra_tools,
+    model=args.model or None,
 )
 
 # Print as JSON to stdout — the orchestrator reads this
