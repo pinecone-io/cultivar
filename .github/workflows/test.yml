@@ -5,7 +5,25 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run ruff
+        run: uv run --group lint ruff check .
+
   test:
     name: test
     runs-on: ubuntu-latest
@@ -23,3 +41,20 @@ jobs:
 
       - name: Run pytest
         run: uv run pytest
+
+  audit:
+    name: audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run pip-audit
+        run: |
+          uv export --format requirements-txt --no-emit-project > requirements-audit.txt
+          uvx pip-audit -r requirements-audit.txt
