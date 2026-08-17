@@ -107,15 +107,10 @@ def run_one_remote(
         # Drop the with-docs prompt prefix as a file in the sandbox so we can
         # pass it to entry.py without bloating argv (~100 KB cap, but argv is
         # noisy and harder to inspect than a file the entry script reads).
-        # NOTE: sb.filesystem.write_bytes raises TypeError on the Modal versions
-        # we hit in practice (signature drift). Using sb.open emits a
-        # PendingDeprecationWarning but actually works. Revisit when Modal
-        # stabilizes the filesystem API.
         docs_file_remote = ""
         if docs_context:
             docs_file_remote = "/workspace/.docs_context.txt"
-            with sb.open(docs_file_remote, "wb") as f:
-                f.write(docs_context.encode("utf-8"))
+            sb.filesystem.write_text(docs_context, docs_file_remote)
 
         # Run the eval via entry.py
         cmd_args = [
@@ -188,13 +183,11 @@ def run_one_remote(
                     continue
                 dest = workdir_out / rel
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                # sb.filesystem.copy_to_local raises TypeError on the Modal
-                # versions we use; sb.open emits a deprecation warning but
-                # actually pulls bytes back to local disk. Without this the
-                # workdir capture silently no-ops and code-gen runs autofail
-                # despite the agent having written the file.
-                with sb.open(abs_path, "rb") as src:
-                    dest.write_bytes(src.read())
+                # Keep the local write on our side instead of using
+                # copy_to_local, whose signature has drifted across Modal
+                # versions. If this capture breaks, code-gen runs autofail
+                # silently: the agent writes its file and nothing collects it.
+                dest.write_bytes(sb.filesystem.read_bytes(abs_path))
 
         # Run teardown inside sandbox
         if teardown:

@@ -19,7 +19,10 @@ dependencies = [
     "typer",
     "rich",
     "anthropic",
-    "modal",
+    # Floor, not a pin: the Sandbox.filesystem namespace this uses replaced an
+    # API Modal removed server-side, so an older client resolves fine and then
+    # fails at the first sandbox file write.
+    "modal>=1.5.4",
     "python-dotenv",
 ]
 
