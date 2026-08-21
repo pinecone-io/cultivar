@@ -14,11 +14,21 @@ LLM-based grader that scores runner conversations against natural-language crite
 
 ## Model
 
-Default: `claude-haiku-4-5-20251001`. Override with `--model claude-…` — any current Claude model works, including the "-5" generation (`claude-opus-5`, `claude-sonnet-5`) and Fable/Mythos 5, which think by default. The grader detects the model family and adjusts the request so the reply is still plain JSON text:
+Default: `claude-haiku-4-5-20251001`. Override with `--model claude-…` — any current Claude model works, including the "-5" generation (`claude-opus-5`, `claude-sonnet-5`, optionally pinned to a dated snapshot like `claude-opus-5-20260315`) and Fable/Mythos 5, which think by default. The grader classifies the model from its id alone and adjusts the request so the reply is still plain JSON text:
 
 - Older models (`claude-haiku-4-5`, `claude-sonnet-4-6`, the 4.x Opus/Sonnet line) already default to no thinking — nothing changes for them.
-- Bare "-5" models (`claude-opus-5`, `claude-sonnet-5`) think by default, so the grader explicitly sends `thinking: {"type": "disabled"}`.
-- `claude-fable-5` / `claude-mythos-5` can't disable thinking at all — the grader omits the `thinking` param, runs at `effort: low` to keep thinking shallow, and gives the response more `max_tokens` headroom since thinking and the JSON reply share the same budget. Response parsing scans for the first text block instead of assuming it's `content[0]`.
+- Bare or dated "-5" models (`claude-opus-5`, `claude-sonnet-5`, `claude-opus-5-20260315`, …) think by default, so the grader explicitly sends `thinking: {"type": "disabled"}`.
+- `claude-fable-5` / `claude-mythos-5` (and their dated snapshots) can't disable thinking at all — the grader omits the `thinking` param, runs at `effort: low` to keep thinking shallow, and doubles `--max-tokens` since thinking and the JSON reply share the same budget.
+
+Response parsing scans past leading `thinking`/`redacted_thinking` blocks for the first text block instead of assuming it's `content[0]`, but still raises loudly on any other unexpected block type (e.g. `tool_use` — this call never passes tools, so seeing one means something is misconfigured).
+
+## Max tokens
+
+`--max-tokens` (default `4096`) caps each grader reply. Raise it if `evidence`/`reasoning` are getting truncated — check `grades.json` for a `reasoning` mentioning `_salvage_truncated_grade`'s header-only recovery — or if you're using a model whose thinking can't be disabled; those already get double whatever value you pass here.
+
+## Grader call failures
+
+If a single conversation's grading call raises (e.g. a thinking-only model exhausts `--max-tokens` before producing any text), it no longer aborts the whole run. `_grade_conversation_safely` converts the exception into a normal FAIL grade with a `cause`/`fix` suggestion naming the error, prints a warning, and the rest of the batch continues — only that one entry needs a re-grade.
 
 ## Prompt anatomy
 
