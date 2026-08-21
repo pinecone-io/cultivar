@@ -9,7 +9,7 @@ from typing import Any
 import typer
 import yaml
 from anthropic import Anthropic
-from anthropic.types import TextBlock
+from anthropic.types import RedactedThinkingBlock, TextBlock, ThinkingBlock
 
 from evals.framework.reporting import (
     console,
@@ -537,15 +537,25 @@ def grade_one(
 
     # The SDK's content blocks are a discriminated union; only TextBlock has
     # .text. Grader prompts don't use tools, but models that think by default
-    # (and can't be told not to, e.g. Fable 5 / Mythos 5) prepend one or more
-    # thinking blocks — so find the first TextBlock rather than assuming
-    # content[0] is it.
-    text_block = next((b for b in response.content if isinstance(b, TextBlock)), None)
+    # (and can't be told not to, e.g. Fable 5 / Mythos 5) legitimately prepend
+    # one or more thinking blocks — tolerate those specifically instead of
+    # assuming content[0] is the reply, but still fail loudly on anything else
+    # (e.g. a tool_use block, which would mean something is misconfigured).
+    text_block = None
+    for block in response.content:
+        if isinstance(block, TextBlock):
+            text_block = block
+            break
+        if not isinstance(block, (ThinkingBlock, RedactedThinkingBlock)):
+            raise RuntimeError(
+                f"Grader response contained an unexpected {type(block).__name__} block. "
+                "Did someone enable tool use on the grader call?"
+            )
     if text_block is None:
-        block_types = [type(b).__name__ for b in response.content]
         raise RuntimeError(
-            f"Grader response contained no TextBlock (got: {block_types}). "
-            "Did someone enable tool use on the grader call?"
+            "Grader response contained only thinking blocks, no text reply. The model "
+            "likely spent its entire max_tokens budget thinking before producing any "
+            "output — try raising --max-tokens or lowering the grading model's effort."
         )
     text = text_block.text.strip()
     if text.startswith("```"):

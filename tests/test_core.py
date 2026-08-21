@@ -1089,13 +1089,15 @@ class TestGradeOneThinkingModels:
     @pytest.fixture(autouse=True)
     def _import(self):
         try:
-            from anthropic.types import TextBlock, ThinkingBlock
+            from anthropic.types import RedactedThinkingBlock, TextBlock, ThinkingBlock, ToolUseBlock
 
             from evals.framework.grader import grade_one
 
             self.grade_one = grade_one
             self.TextBlock = TextBlock
             self.ThinkingBlock = ThinkingBlock
+            self.RedactedThinkingBlock = RedactedThinkingBlock
+            self.ToolUseBlock = ToolUseBlock
         except ImportError:
             pytest.skip("anthropic SDK not installed")
 
@@ -1142,8 +1144,31 @@ class TestGradeOneThinkingModels:
         content = [self.ThinkingBlock(type="thinking", thinking="", signature="sig")]
         client = self._fake_client(content)
         task, conversation = self._task_and_conversation()
-        with pytest.raises(RuntimeError, match="no TextBlock"):
+        with pytest.raises(RuntimeError, match="only thinking blocks"):
             self.grade_one(client, "claude-fable-5", task, conversation, examples_block="")
+
+    def test_redacted_thinking_block_is_also_tolerated(self):
+        content = [
+            self.RedactedThinkingBlock(type="redacted_thinking", data="encrypted"),
+            self.TextBlock(type="text", text='{"pass": true}'),
+        ]
+        client = self._fake_client(content)
+        task, conversation = self._task_and_conversation()
+        grade = self.grade_one(client, "claude-fable-5", task, conversation, examples_block="")
+        assert grade["pass"] is True
+
+    def test_tool_use_block_before_text_still_raises_loudly(self):
+        """A tool_use block means something is misconfigured (the grader call
+        never passes tools=) -- unlike thinking blocks, it must not be
+        silently skipped over on the way to the trailing text block."""
+        content = [
+            self.ToolUseBlock(type="tool_use", id="toolu_1", name="some_tool", input={}),
+            self.TextBlock(type="text", text='{"pass": true}'),
+        ]
+        client = self._fake_client(content)
+        task, conversation = self._task_and_conversation()
+        with pytest.raises(RuntimeError, match="unexpected ToolUseBlock"):
+            self.grade_one(client, "claude-haiku-4-5-20251001", task, conversation, examples_block="")
 
 
 class TestGradeConversationSafely:
