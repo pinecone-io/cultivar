@@ -46,11 +46,6 @@ DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 
 GRADER_MAX_TOKENS = 4096
 
-# Some models generate a thinking block or two before the JSON reply's text
-# block, which shares this budget -- give those calls extra headroom so the
-# reply itself doesn't get truncated. See _grader_request_kwargs below.
-GRADER_MAX_TOKENS_WITH_THINKING = 8192
-
 # Claude Fable 5 / Mythos 5 think on every request and reject an explicit
 # `thinking: {"type": "disabled"}` at any effort level -- the grader must not
 # send a `thinking` param to these at all. The optional `-YYYYMMDD` group
@@ -69,7 +64,7 @@ _ALWAYS_THINKS = re.compile(r"^claude-(fable|mythos)-\d+(-\d{8})?$")
 _THINKS_BY_DEFAULT = re.compile(r"^claude-(opus|sonnet|haiku)-\d+(-\d{8})?$")
 
 
-def _grader_request_kwargs(model: str) -> dict:
+def _grader_request_kwargs(model: str, base_max_tokens: int = GRADER_MAX_TOKENS) -> dict:
     """All extra `messages.create` kwargs for a grader call, keyed by model alone.
 
     This is the single place that decides how a thinking-by-default Claude
@@ -80,18 +75,19 @@ def _grader_request_kwargs(model: str) -> dict:
     classification -- it never needs extended thinking, and `grade_one`
     assumes the reply is a JSON text block. Older models (haiku-4-5,
     sonnet-4-6, the 4.x Opus/Sonnet line) already run with thinking off by
-    default, so they get no extra kwargs. The "-5" generation thinks by
-    default, so explicitly turn it back off. Fable 5 / Mythos 5 can't turn
-    thinking off at all -- omit `thinking` for those, keep it shallow with a
-    low effort, and double the token budget since thinking and the reply
-    share it (see `grade_one`'s response parsing, which scans past leading
-    thinking blocks instead of assuming the reply is `content[0]`).
+    default, so they get `base_max_tokens` unchanged. The "-5" generation
+    thinks by default, so explicitly turn it back off. Fable 5 / Mythos 5
+    can't turn thinking off at all -- omit `thinking` for those, keep it
+    shallow with a low effort, and double `base_max_tokens` since thinking
+    and the reply share it (see `grade_one`'s response parsing, which scans
+    past leading thinking blocks instead of assuming the reply is
+    `content[0]`).
     """
     if _ALWAYS_THINKS.match(model):
-        return {"max_tokens": GRADER_MAX_TOKENS_WITH_THINKING, "output_config": {"effort": "low"}}
+        return {"max_tokens": base_max_tokens * 2, "output_config": {"effort": "low"}}
     if _THINKS_BY_DEFAULT.match(model):
-        return {"max_tokens": GRADER_MAX_TOKENS, "thinking": {"type": "disabled"}}
-    return {"max_tokens": GRADER_MAX_TOKENS}
+        return {"max_tokens": base_max_tokens, "thinking": {"type": "disabled"}}
+    return {"max_tokens": base_max_tokens}
 
 
 _AGENT_SIGNALS = (
@@ -468,6 +464,7 @@ def grade_one(
     examples_block: str,
     skill_content: str = "",
     workdir_content: str = "",
+    max_tokens: int = GRADER_MAX_TOKENS,
 ) -> dict[str, Any]:
     conv_str = conversation.get("conversation_md", "")
 
@@ -532,7 +529,7 @@ def grade_one(
     response = client.messages.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
-        **_grader_request_kwargs(model),
+        **_grader_request_kwargs(model, max_tokens),
     )
 
     # The SDK's content blocks are a discriminated union; only TextBlock has
@@ -589,6 +586,7 @@ def _grade_conversation_safely(
     skill_content: str,
     workdir_content: str,
     label: str,
+    max_tokens: int = GRADER_MAX_TOKENS,
 ) -> dict[str, Any]:
     """Call grade_one, turning any exception into a FAIL grade instead of propagating it.
 
@@ -601,7 +599,7 @@ def _grade_conversation_safely(
     producing any text, so the call is now guarded.
     """
     try:
-        return grade_one(client, model, task, conversation, examples_block, skill_content, workdir_content)
+        return grade_one(client, model, task, conversation, examples_block, skill_content, workdir_content, max_tokens)
     except Exception as e:
         console.print(f"[red]Grader call failed for {label}: {e}[/red]")
         return {
@@ -639,7 +637,7 @@ def _salvage_truncated_grade(text: str) -> dict:
             "reasoning": (
                 "Grader response exceeded max_tokens or was malformed; recovered "
                 "the pass/fail verdict from the start of the JSON. Evidence and "
-                "reasoning fields lost — bump GRADER_MAX_TOKENS or tighten the "
+                "reasoning fields lost — pass a higher --max-tokens or tighten the "
                 "criteria's evidence cap if this recurs."
             ),
         }
@@ -683,6 +681,14 @@ def main(
         help="Skill name for loading SKILL.md + calibration examples. Auto-detected from <results_dir>/tasks.json if omitted.",
     ),
     model: str = typer.Option(DEFAULT_MODEL, help=f"Anthropic model id for grading. Default: {DEFAULT_MODEL}."),
+    max_tokens: int = typer.Option(
+        GRADER_MAX_TOKENS,
+        "--max-tokens",
+        help=(
+            "Max tokens for each grader reply. Doubled automatically for models that "
+            f"can't disable thinking (e.g. claude-fable-5). Default: {GRADER_MAX_TOKENS}."
+        ),
+    ),
     report: bool = typer.Option(
         True, help="Print the report after grading. Use --no-report to only write grades.json."
     ),
@@ -714,6 +720,7 @@ def main(
       cultivar grade latest --model claude-sonnet-4-6        # use a stronger grader
       cultivar grade latest --no-report                      # write grades.json, skip the report
       cultivar grade latest --fail-under 80                  # exit 1 if with-skill pass rate < 80%
+      cultivar grade latest --max-tokens 8192                 # give the grader more room per reply
 
     See docs/grader.md for prompt structure and calibration tips.
     """
@@ -829,6 +836,7 @@ def main(
                     skill_content,
                     workdir_content,
                     label=f"{task_id} / {runner_name}/{variant}",
+                    max_tokens=max_tokens,
                 )
 
             # Extract run stats from the JSON output

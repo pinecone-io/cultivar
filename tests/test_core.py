@@ -1082,6 +1082,11 @@ class TestGraderRequestKwargs:
         thinking concept -- it must fall through to plain max_tokens."""
         assert self.kwargs("claude-instant-1") == {"max_tokens": 4096}
 
+    def test_custom_base_max_tokens_is_respected_and_doubled_where_needed(self):
+        assert self.kwargs("claude-haiku-4-5-20251001", 2000) == {"max_tokens": 2000}
+        assert self.kwargs("claude-opus-5", 2000) == {"max_tokens": 2000, "thinking": {"type": "disabled"}}
+        assert self.kwargs("claude-fable-5", 2000) == {"max_tokens": 4000, "output_config": {"effort": "low"}}
+
 
 class TestGradeOneThinkingModels:
     """grade_one: request shape and response parsing across model families."""
@@ -1157,6 +1162,13 @@ class TestGradeOneThinkingModels:
         grade = self.grade_one(client, "claude-fable-5", task, conversation, examples_block="")
         assert grade["pass"] is True
 
+    def test_custom_max_tokens_is_threaded_through(self):
+        client = self._fake_client([self.TextBlock(type="text", text='{"pass": true}')])
+        task, conversation = self._task_and_conversation()
+        self.grade_one(client, "claude-opus-5", task, conversation, examples_block="", max_tokens=1024)
+        call = client.messages.calls[0]
+        assert call["max_tokens"] == 1024
+
     def test_tool_use_block_before_text_still_raises_loudly(self):
         """A tool_use block means something is misconfigured (the grader call
         never passes tools=) -- unlike thinking blocks, it must not be
@@ -1213,6 +1225,19 @@ class TestGradeConversationSafely:
         grade = self.safe_grade(client, "claude-haiku-4-5-20251001", task, conversation, "", "", "", label="task/x")
 
         assert grade["pass"] is True
+
+
+class TestGradeCliMaxTokensFlag:
+    """`cultivar grade --max-tokens` is wired up on the CLI, not just grade_one()."""
+
+    def test_max_tokens_flag_is_registered(self):
+        from typer.testing import CliRunner
+
+        from evals.cli import app
+
+        result = CliRunner().invoke(app, ["grade", "--help"])
+        assert result.exit_code == 0, result.output
+        assert "--max-tokens" in result.output
 
 
 class TestCodeGenEmptyWorkdirAutofail:
