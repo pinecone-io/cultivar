@@ -564,6 +564,45 @@ def grade_one(
     return grade
 
 
+def _grade_conversation_safely(
+    client: Anthropic,
+    model: str,
+    task: dict,
+    conversation: dict,
+    examples_block: str,
+    skill_content: str,
+    workdir_content: str,
+    label: str,
+) -> dict[str, Any]:
+    """Call grade_one, turning any exception into a FAIL grade instead of propagating it.
+
+    main()'s loop grades every conversation in a results dir before writing
+    grades.json once at the end -- an uncaught exception from grade_one on
+    one file would abort the whole run and discard every grade already
+    computed for it. This used to be a low-risk assumption (grade_one's few
+    ways to raise were essentially unreachable), but a thinking-by-default
+    model can genuinely raise if it exhausts its budget on thinking before
+    producing any text, so the call is now guarded.
+    """
+    try:
+        return grade_one(client, model, task, conversation, examples_block, skill_content, workdir_content)
+    except Exception as e:
+        console.print(f"[red]Grader call failed for {label}: {e}[/red]")
+        return {
+            "pass": False,
+            "proposed_command": "",
+            "evidence": "",
+            "reasoning": f"Grader call raised {type(e).__name__}: {e}",
+            "suggestions": [
+                {
+                    "cause": f"grade_one() raised {type(e).__name__} instead of returning a grade.",
+                    "fix": "Re-run `cultivar grade` for this results dir once the cause is fixed — "
+                    "other conversations' grades in this run were not affected.",
+                }
+            ],
+        }
+
+
 def _salvage_truncated_grade(text: str) -> dict:
     """Best-effort field extraction when the grader's JSON is malformed/truncated.
 
@@ -765,7 +804,16 @@ def main(
                 examples_block = load_examples(skill, task_id=task_id)
                 workdir = conv_file.parent / f"{conv_file.stem}.workdir"
                 workdir_content = load_workdir_files(workdir)
-                grade = grade_one(client, model, task, conversation, examples_block, skill_content, workdir_content)
+                grade = _grade_conversation_safely(
+                    client,
+                    model,
+                    task,
+                    conversation,
+                    examples_block,
+                    skill_content,
+                    workdir_content,
+                    label=f"{task_id} / {runner_name}/{variant}",
+                )
 
             # Extract run stats from the JSON output
             usage = conversation.get("usage") or {}

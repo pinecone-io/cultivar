@@ -1017,6 +1017,29 @@ class TestEmptyTraceAutofail:
         assert self.has(md) is True
 
 
+def _fake_anthropic_client(content):
+    """A minimal stand-in for anthropic.Anthropic() that records the kwargs
+    passed to messages.create and returns a canned response."""
+
+    class FakeResponse:
+        def __init__(self, content):
+            self.content = content
+
+    class FakeMessages:
+        def __init__(self):
+            self.calls = []
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            return FakeResponse(content)
+
+    class FakeClient:
+        def __init__(self):
+            self.messages = FakeMessages()
+
+    return FakeClient()
+
+
 class TestThinkingKwargs:
     """_thinking_kwargs: model-aware handling of Claude's thinking-by-default models."""
 
@@ -1059,23 +1082,7 @@ class TestGradeOneThinkingModels:
             pytest.skip("anthropic SDK not installed")
 
     def _fake_client(self, content):
-        class FakeResponse:
-            def __init__(self, content):
-                self.content = content
-
-        class FakeMessages:
-            def __init__(self):
-                self.calls = []
-
-            def create(self, **kwargs):
-                self.calls.append(kwargs)
-                return FakeResponse(content)
-
-        class FakeClient:
-            def __init__(self):
-                self.messages = FakeMessages()
-
-        return FakeClient()
+        return _fake_anthropic_client(content)
 
     def _task_and_conversation(self):
         task = {"ground_truth": {"criteria": "test"}}
@@ -1119,6 +1126,50 @@ class TestGradeOneThinkingModels:
         task, conversation = self._task_and_conversation()
         with pytest.raises(RuntimeError, match="no TextBlock"):
             self.grade_one(client, "claude-fable-5", task, conversation, examples_block="")
+
+
+class TestGradeConversationSafely:
+    """_grade_conversation_safely: a grader crash must not blow up the whole batch."""
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        try:
+            from anthropic.types import ThinkingBlock
+
+            from evals.framework.grader import _grade_conversation_safely
+
+            self.safe_grade = _grade_conversation_safely
+            self.ThinkingBlock = ThinkingBlock
+        except ImportError:
+            pytest.skip("anthropic SDK not installed")
+
+    def test_grade_one_exception_becomes_a_fail_grade(self):
+        """A thinking-only response with no text (see TestGradeOneThinkingModels
+        above) makes grade_one raise -- the wrapper must catch it and return a
+        FAIL grade instead of letting it propagate out of main()'s loop."""
+        content = [self.ThinkingBlock(type="thinking", thinking="", signature="sig")]
+        client = _fake_anthropic_client(content)
+        task = {"ground_truth": {"criteria": "test"}}
+        conversation = {"conversation_md": "**Assistant:** did the thing"}
+
+        grade = self.safe_grade(
+            client, "claude-fable-5", task, conversation, "", "", "", label="my-task / claude/with-skill"
+        )
+
+        assert grade["pass"] is False
+        assert "RuntimeError" in grade["reasoning"]
+        assert grade["suggestions"]
+
+    def test_successful_grade_passes_through_unchanged(self):
+        from anthropic.types import TextBlock
+
+        client = _fake_anthropic_client([TextBlock(type="text", text='{"pass": true}')])
+        task = {"ground_truth": {"criteria": "test"}}
+        conversation = {"conversation_md": "**Assistant:** did the thing"}
+
+        grade = self.safe_grade(client, "claude-haiku-4-5-20251001", task, conversation, "", "", "", label="task/x")
+
+        assert grade["pass"] is True
 
 
 class TestCodeGenEmptyWorkdirAutofail:
