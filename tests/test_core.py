@@ -1017,6 +1017,110 @@ class TestEmptyTraceAutofail:
         assert self.has(md) is True
 
 
+class TestThinkingKwargs:
+    """_thinking_kwargs: model-aware handling of Claude's thinking-by-default models."""
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        try:
+            from evals.framework.grader import _thinking_kwargs
+
+            self.kwargs = _thinking_kwargs
+        except ImportError:
+            pytest.skip("anthropic SDK not installed")
+
+    def test_older_dated_model_gets_no_thinking_kwargs(self):
+        assert self.kwargs("claude-haiku-4-5-20251001") == {}
+        assert self.kwargs("claude-opus-4-6") == {}
+
+    def test_bare_five_series_model_disables_thinking(self):
+        assert self.kwargs("claude-opus-5") == {"thinking": {"type": "disabled"}}
+        assert self.kwargs("claude-sonnet-5") == {"thinking": {"type": "disabled"}}
+
+    def test_fable_and_mythos_get_no_thinking_kwargs(self):
+        assert self.kwargs("claude-fable-5") == {}
+        assert self.kwargs("claude-mythos-5") == {}
+
+
+class TestGradeOneThinkingModels:
+    """grade_one: request shape and response parsing across model families."""
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        try:
+            from anthropic.types import TextBlock, ThinkingBlock
+
+            from evals.framework.grader import grade_one
+
+            self.grade_one = grade_one
+            self.TextBlock = TextBlock
+            self.ThinkingBlock = ThinkingBlock
+        except ImportError:
+            pytest.skip("anthropic SDK not installed")
+
+    def _fake_client(self, content):
+        class FakeResponse:
+            def __init__(self, content):
+                self.content = content
+
+        class FakeMessages:
+            def __init__(self):
+                self.calls = []
+
+            def create(self, **kwargs):
+                self.calls.append(kwargs)
+                return FakeResponse(content)
+
+        class FakeClient:
+            def __init__(self):
+                self.messages = FakeMessages()
+
+        return FakeClient()
+
+    def _task_and_conversation(self):
+        task = {"ground_truth": {"criteria": "test"}}
+        conversation = {"conversation_md": "**Assistant:** did the thing"}
+        return task, conversation
+
+    def test_five_series_model_disables_thinking(self):
+        client = self._fake_client([self.TextBlock(type="text", text='{"pass": true}')])
+        task, conversation = self._task_and_conversation()
+        self.grade_one(client, "claude-opus-5", task, conversation, examples_block="")
+        call = client.messages.calls[0]
+        assert call["thinking"] == {"type": "disabled"}
+        assert call["max_tokens"] == 4096
+
+    def test_always_thinking_model_skips_thinking_param_and_parses_past_it(self):
+        content = [
+            self.ThinkingBlock(type="thinking", thinking="", signature="sig"),
+            self.TextBlock(type="text", text='{"pass": true}'),
+        ]
+        client = self._fake_client(content)
+        task, conversation = self._task_and_conversation()
+        grade = self.grade_one(client, "claude-fable-5", task, conversation, examples_block="")
+        call = client.messages.calls[0]
+        assert "thinking" not in call
+        assert call["output_config"] == {"effort": "low"}
+        assert call["max_tokens"] == 8192
+        assert grade["pass"] is True
+
+    def test_older_model_omits_thinking_kwargs(self):
+        client = self._fake_client([self.TextBlock(type="text", text='{"pass": false}')])
+        task, conversation = self._task_and_conversation()
+        grade = self.grade_one(client, "claude-haiku-4-5-20251001", task, conversation, examples_block="")
+        call = client.messages.calls[0]
+        assert "thinking" not in call
+        assert "output_config" not in call
+        assert grade["pass"] is False
+
+    def test_response_with_only_thinking_blocks_raises(self):
+        content = [self.ThinkingBlock(type="thinking", thinking="", signature="sig")]
+        client = self._fake_client(content)
+        task, conversation = self._task_and_conversation()
+        with pytest.raises(RuntimeError, match="no TextBlock"):
+            self.grade_one(client, "claude-fable-5", task, conversation, examples_block="")
+
+
 class TestCodeGenEmptyWorkdirAutofail:
     """grade_one autofails code-gen tasks whose workdir is empty — no file =
     no deliverable, regardless of how good the conversation looked."""

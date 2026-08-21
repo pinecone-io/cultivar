@@ -14,7 +14,11 @@ LLM-based grader that scores runner conversations against natural-language crite
 
 ## Model
 
-Default: `claude-haiku-4-5-20251001`. Override with `--model claude-…`.
+Default: `claude-haiku-4-5-20251001`. Override with `--model claude-…` — any current Claude model works, including the "-5" generation (`claude-opus-5`, `claude-sonnet-5`) and Fable/Mythos 5, which think by default. The grader detects the model family and adjusts the request so the reply is still plain JSON text:
+
+- Older models (`claude-haiku-4-5`, `claude-sonnet-4-6`, the 4.x Opus/Sonnet line) already default to no thinking — nothing changes for them.
+- Bare "-5" models (`claude-opus-5`, `claude-sonnet-5`) think by default, so the grader explicitly sends `thinking: {"type": "disabled"}`.
+- `claude-fable-5` / `claude-mythos-5` can't disable thinking at all — the grader omits the `thinking` param, runs at `effort: low` to keep thinking shallow, and gives the response more `max_tokens` headroom since thinking and the JSON reply share the same budget. Response parsing scans for the first text block instead of assuming it's `content[0]`.
 
 ## Prompt anatomy
 

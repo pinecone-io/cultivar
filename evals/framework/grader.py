@@ -46,6 +46,41 @@ DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 
 GRADER_MAX_TOKENS = 4096
 
+# Some models generate a thinking block or two before the JSON reply's text
+# block, which shares this budget -- give those calls extra headroom so the
+# reply itself doesn't get truncated. See _thinking_kwargs below.
+GRADER_MAX_TOKENS_WITH_THINKING = 8192
+
+# Claude Fable 5 / Mythos 5 think on every request and reject an explicit
+# `thinking: {"type": "disabled"}` at any effort level -- the grader must not
+# send a `thinking` param to these at all.
+_ALWAYS_THINKS = re.compile(r"^claude-(fable|mythos)-\d")
+
+# The "-5" model generation (Opus 5, Sonnet 5, ...) thinks by default but can
+# be told not to. Matches bare `claude-<family>-<generation>` ids and not the
+# older dotted/dated ones (`claude-haiku-4-5`, `claude-opus-4-6`, ...), which
+# already default to no thinking and need no extra kwargs here.
+_THINKS_BY_DEFAULT = re.compile(r"^claude-[a-z]+-\d+$")
+
+
+def _thinking_kwargs(model: str) -> dict:
+    """Extra `messages.create` kwargs that keep a grader call thinking-free.
+
+    The grader's job is a plain pass/fail classification -- it never needs
+    extended thinking, and `grade_one` assumes the reply is a JSON text
+    block. Older models (haiku-4-5, sonnet-4-6, the 4.x Opus/Sonnet line)
+    already run with thinking off by default, so nothing needs to change for
+    them. The "-5" generation thinks by default, so explicitly turn it back
+    off. Fable 5 / Mythos 5 can't turn thinking off at all -- leave `thinking`
+    unset for those and rely on `grade_one` scanning the response for the
+    text block instead of assuming it's first.
+    """
+    if _ALWAYS_THINKS.match(model):
+        return {}
+    if _THINKS_BY_DEFAULT.match(model):
+        return {"thinking": {"type": "disabled"}}
+    return {}
+
 
 _AGENT_SIGNALS = (
     "**Assistant:**",
@@ -482,24 +517,31 @@ def grade_one(
         task, conv_str, examples_block, skill_content, verify_output, workdir_content, refs_content
     )
 
+    thinking_kwargs = _thinking_kwargs(model)
+    always_thinks = bool(_ALWAYS_THINKS.match(model))
+    if always_thinks:
+        thinking_kwargs["output_config"] = {"effort": "low"}
+
     response = client.messages.create(
         model=model,
-        max_tokens=GRADER_MAX_TOKENS,
+        max_tokens=GRADER_MAX_TOKENS_WITH_THINKING if always_thinks else GRADER_MAX_TOKENS,
         messages=[{"role": "user", "content": prompt}],
+        **thinking_kwargs,
     )
 
     # The SDK's content blocks are a discriminated union; only TextBlock has
-    # .text. Grader prompts don't use tools or thinking, so the first block is
-    # always TextBlock at runtime — narrow explicitly so the type checker is
-    # happy and any future drift (e.g. enabling thinking) fails loudly instead
-    # of silently.
-    first_block = response.content[0]
-    if not isinstance(first_block, TextBlock):
+    # .text. Grader prompts don't use tools, but models that think by default
+    # (and can't be told not to, e.g. Fable 5 / Mythos 5) prepend one or more
+    # thinking blocks — so find the first TextBlock rather than assuming
+    # content[0] is it.
+    text_block = next((b for b in response.content if isinstance(b, TextBlock)), None)
+    if text_block is None:
+        block_types = [type(b).__name__ for b in response.content]
         raise RuntimeError(
-            f"Grader response first block was {type(first_block).__name__}, expected TextBlock. "
-            "Did someone enable thinking or tool use on the grader call?"
+            f"Grader response contained no TextBlock (got: {block_types}). "
+            "Did someone enable tool use on the grader call?"
         )
-    text = first_block.text.strip()
+    text = text_block.text.strip()
     if text.startswith("```"):
         lines = text.split("\n")
         # Remove opening fence (```json, ```, etc.)
