@@ -1069,6 +1069,19 @@ class TestGraderRequestKwargs:
         assert self.kwargs("claude-fable-5") == expected
         assert self.kwargs("claude-mythos-5") == expected
 
+    def test_pinned_dated_snapshot_of_a_five_series_model_still_matches(self):
+        assert self.kwargs("claude-opus-5-20260315") == {"max_tokens": 4096, "thinking": {"type": "disabled"}}
+        assert self.kwargs("claude-fable-5-20260315") == {
+            "max_tokens": 8192,
+            "output_config": {"effort": "low"},
+        }
+
+    def test_unrelated_legacy_model_id_is_not_misclassified(self):
+        """claude-instant-1 has the same shallow family-digit shape as
+        claude-opus-5 but is a different, older family that never had a
+        thinking concept -- it must fall through to plain max_tokens."""
+        assert self.kwargs("claude-instant-1") == {"max_tokens": 4096}
+
 
 class TestGradeOneThinkingModels:
     """grade_one: request shape and response parsing across model families."""

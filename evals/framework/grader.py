@@ -53,14 +53,20 @@ GRADER_MAX_TOKENS_WITH_THINKING = 8192
 
 # Claude Fable 5 / Mythos 5 think on every request and reject an explicit
 # `thinking: {"type": "disabled"}` at any effort level -- the grader must not
-# send a `thinking` param to these at all.
-_ALWAYS_THINKS = re.compile(r"^claude-(fable|mythos)-\d")
+# send a `thinking` param to these at all. The optional `-YYYYMMDD` group
+# matches a pinned dated snapshot (e.g. "claude-fable-5-20260315") the same
+# way as the bare alias.
+_ALWAYS_THINKS = re.compile(r"^claude-(fable|mythos)-\d+(-\d{8})?$")
 
-# The "-5" model generation (Opus 5, Sonnet 5, ...) thinks by default but can
-# be told not to. Matches bare `claude-<family>-<generation>` ids and not the
-# older dotted/dated ones (`claude-haiku-4-5`, `claude-opus-4-6`, ...), which
-# already default to no thinking and need no extra kwargs here.
-_THINKS_BY_DEFAULT = re.compile(r"^claude-[a-z]+-\d+$")
+# The "-5" model generation (Opus 5, Sonnet 5, Haiku 5, ...) thinks by default
+# but can be told not to. The family name is an explicit allowlist rather
+# than a loose `[a-z]+`, which would also match model ids from unrelated
+# families with the same shallow `family-digit` shape (e.g. "claude-instant-1")
+# that never had a thinking concept at all. Matches a bare generation number
+# or one pinned to a `-YYYYMMDD` dated snapshot, and not the dotted/multi-part
+# ids (`claude-haiku-4-5`, `claude-opus-4-6`, ...), which already default to
+# no thinking and need no extra kwargs here.
+_THINKS_BY_DEFAULT = re.compile(r"^claude-(opus|sonnet|haiku)-\d+(-\d{8})?$")
 
 
 def _grader_request_kwargs(model: str) -> dict:
