@@ -48,7 +48,7 @@ GRADER_MAX_TOKENS = 4096
 
 # Some models generate a thinking block or two before the JSON reply's text
 # block, which shares this budget -- give those calls extra headroom so the
-# reply itself doesn't get truncated. See _thinking_kwargs below.
+# reply itself doesn't get truncated. See _grader_request_kwargs below.
 GRADER_MAX_TOKENS_WITH_THINKING = 8192
 
 # Claude Fable 5 / Mythos 5 think on every request and reject an explicit
@@ -63,23 +63,29 @@ _ALWAYS_THINKS = re.compile(r"^claude-(fable|mythos)-\d")
 _THINKS_BY_DEFAULT = re.compile(r"^claude-[a-z]+-\d+$")
 
 
-def _thinking_kwargs(model: str) -> dict:
-    """Extra `messages.create` kwargs that keep a grader call thinking-free.
+def _grader_request_kwargs(model: str) -> dict:
+    """All extra `messages.create` kwargs for a grader call, keyed by model alone.
 
-    The grader's job is a plain pass/fail classification -- it never needs
-    extended thinking, and `grade_one` assumes the reply is a JSON text
-    block. Older models (haiku-4-5, sonnet-4-6, the 4.x Opus/Sonnet line)
-    already run with thinking off by default, so nothing needs to change for
-    them. The "-5" generation thinks by default, so explicitly turn it back
-    off. Fable 5 / Mythos 5 can't turn thinking off at all -- leave `thinking`
-    unset for those and rely on `grade_one` scanning the response for the
-    text block instead of assuming it's first.
+    This is the single place that decides how a thinking-by-default Claude
+    model is handled -- `max_tokens` and the `thinking`/`output_config` kwargs
+    used to be decided in two separate places (this classification, and a
+    second one at the call site), which could silently desync if either was
+    edited without updating the other. The grader's job is a plain pass/fail
+    classification -- it never needs extended thinking, and `grade_one`
+    assumes the reply is a JSON text block. Older models (haiku-4-5,
+    sonnet-4-6, the 4.x Opus/Sonnet line) already run with thinking off by
+    default, so they get no extra kwargs. The "-5" generation thinks by
+    default, so explicitly turn it back off. Fable 5 / Mythos 5 can't turn
+    thinking off at all -- omit `thinking` for those, keep it shallow with a
+    low effort, and double the token budget since thinking and the reply
+    share it (see `grade_one`'s response parsing, which scans past leading
+    thinking blocks instead of assuming the reply is `content[0]`).
     """
     if _ALWAYS_THINKS.match(model):
-        return {}
+        return {"max_tokens": GRADER_MAX_TOKENS_WITH_THINKING, "output_config": {"effort": "low"}}
     if _THINKS_BY_DEFAULT.match(model):
-        return {"thinking": {"type": "disabled"}}
-    return {}
+        return {"max_tokens": GRADER_MAX_TOKENS, "thinking": {"type": "disabled"}}
+    return {"max_tokens": GRADER_MAX_TOKENS}
 
 
 _AGENT_SIGNALS = (
@@ -517,16 +523,10 @@ def grade_one(
         task, conv_str, examples_block, skill_content, verify_output, workdir_content, refs_content
     )
 
-    thinking_kwargs = _thinking_kwargs(model)
-    always_thinks = bool(_ALWAYS_THINKS.match(model))
-    if always_thinks:
-        thinking_kwargs["output_config"] = {"effort": "low"}
-
     response = client.messages.create(
         model=model,
-        max_tokens=GRADER_MAX_TOKENS_WITH_THINKING if always_thinks else GRADER_MAX_TOKENS,
         messages=[{"role": "user", "content": prompt}],
-        **thinking_kwargs,
+        **_grader_request_kwargs(model),
     )
 
     # The SDK's content blocks are a discriminated union; only TextBlock has

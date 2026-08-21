@@ -1040,29 +1040,34 @@ def _fake_anthropic_client(content):
     return FakeClient()
 
 
-class TestThinkingKwargs:
-    """_thinking_kwargs: model-aware handling of Claude's thinking-by-default models."""
+class TestGraderRequestKwargs:
+    """_grader_request_kwargs: model-aware handling of Claude's thinking-by-default models.
+
+    This is the single source of truth for both the thinking-related kwargs
+    and max_tokens -- grade_one no longer re-derives either separately.
+    """
 
     @pytest.fixture(autouse=True)
     def _import(self):
         try:
-            from evals.framework.grader import _thinking_kwargs
+            from evals.framework.grader import _grader_request_kwargs
 
-            self.kwargs = _thinking_kwargs
+            self.kwargs = _grader_request_kwargs
         except ImportError:
             pytest.skip("anthropic SDK not installed")
 
-    def test_older_dated_model_gets_no_thinking_kwargs(self):
-        assert self.kwargs("claude-haiku-4-5-20251001") == {}
-        assert self.kwargs("claude-opus-4-6") == {}
+    def test_older_dated_model_gets_base_max_tokens_only(self):
+        assert self.kwargs("claude-haiku-4-5-20251001") == {"max_tokens": 4096}
+        assert self.kwargs("claude-opus-4-6") == {"max_tokens": 4096}
 
     def test_bare_five_series_model_disables_thinking(self):
-        assert self.kwargs("claude-opus-5") == {"thinking": {"type": "disabled"}}
-        assert self.kwargs("claude-sonnet-5") == {"thinking": {"type": "disabled"}}
+        assert self.kwargs("claude-opus-5") == {"max_tokens": 4096, "thinking": {"type": "disabled"}}
+        assert self.kwargs("claude-sonnet-5") == {"max_tokens": 4096, "thinking": {"type": "disabled"}}
 
-    def test_fable_and_mythos_get_no_thinking_kwargs(self):
-        assert self.kwargs("claude-fable-5") == {}
-        assert self.kwargs("claude-mythos-5") == {}
+    def test_fable_and_mythos_get_low_effort_and_doubled_budget(self):
+        expected = {"max_tokens": 8192, "output_config": {"effort": "low"}}
+        assert self.kwargs("claude-fable-5") == expected
+        assert self.kwargs("claude-mythos-5") == expected
 
 
 class TestGradeOneThinkingModels:
