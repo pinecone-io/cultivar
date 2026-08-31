@@ -1256,13 +1256,16 @@ class TestGradeCliMaxTokensFlag:
     """`cultivar grade --max-tokens` is wired up on the CLI, not just grade_one()."""
 
     def test_max_tokens_flag_is_registered(self):
-        from typer.testing import CliRunner
+        # Inspect the registered click command directly rather than parsing
+        # rendered --help text -- Rich wraps that output differently
+        # depending on terminal width, which made this flaky in CI.
+        import typer
 
         from evals.cli import app
 
-        result = CliRunner().invoke(app, ["grade", "--help"])
-        assert result.exit_code == 0, result.output
-        assert "--max-tokens" in result.output
+        grade_command = typer.main.get_command(app).commands["grade"]
+        option_names = {opt for param in grade_command.params for opt in param.opts}
+        assert "--max-tokens" in option_names
 
 
 class TestCodeGenEmptyWorkdirAutofail:
