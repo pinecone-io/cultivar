@@ -1215,6 +1215,31 @@ class TestGradeConversationSafely:
         assert "RuntimeError" in grade["reasoning"]
         assert grade["suggestions"]
 
+    def test_auth_error_is_not_swallowed(self):
+        """A bad/revoked API key fails identically on every remaining
+        conversation -- it must still crash the run immediately instead of
+        producing a wall of misleading per-conversation FAIL grades."""
+        import httpx
+        from anthropic import AuthenticationError
+
+        class FailingMessages:
+            def create(self, **kwargs):
+                request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+                response = httpx.Response(401, request=request)
+                raise AuthenticationError("invalid x-api-key", response=response, body=None)
+
+        class FailingClient:
+            def __init__(self):
+                self.messages = FailingMessages()
+
+        task = {"ground_truth": {"criteria": "test"}}
+        conversation = {"conversation_md": "**Assistant:** did the thing"}
+
+        with pytest.raises(AuthenticationError):
+            self.safe_grade(
+                FailingClient(), "claude-haiku-4-5-20251001", task, conversation, "", "", "", label="task/x"
+            )
+
     def test_successful_grade_passes_through_unchanged(self):
         from anthropic.types import TextBlock
 

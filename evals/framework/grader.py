@@ -8,7 +8,7 @@ from typing import Any
 
 import typer
 import yaml
-from anthropic import Anthropic
+from anthropic import Anthropic, AuthenticationError, PermissionDeniedError
 from anthropic.types import RedactedThinkingBlock, TextBlock, ThinkingBlock
 
 from evals.framework.reporting import (
@@ -597,9 +597,18 @@ def _grade_conversation_safely(
     ways to raise were essentially unreachable), but a thinking-by-default
     model can genuinely raise if it exhausts its budget on thinking before
     producing any text, so the call is now guarded.
+
+    Auth/permission errors are deliberately excluded from that guard: a bad
+    or revoked API key fails the same way on every remaining conversation, so
+    swallowing it here would grind through the whole batch producing a wall
+    of identical misleading FAIL grades instead of surfacing the real
+    problem once, immediately -- the way the CLI already did before this
+    wrapper existed.
     """
     try:
         return grade_one(client, model, task, conversation, examples_block, skill_content, workdir_content, max_tokens)
+    except (AuthenticationError, PermissionDeniedError):
+        raise
     except Exception as e:
         console.print(f"[red]Grader call failed for {label}: {e}[/red]")
         return {
