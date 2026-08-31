@@ -8,8 +8,8 @@ from typing import Any
 
 import typer
 import yaml
-from anthropic import Anthropic
-from anthropic.types import TextBlock
+from anthropic import Anthropic, AuthenticationError, PermissionDeniedError
+from anthropic.types import RedactedThinkingBlock, TextBlock, ThinkingBlock
 
 from evals.framework.reporting import (
     console,
@@ -45,6 +45,49 @@ DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 
 
 GRADER_MAX_TOKENS = 4096
+
+# Claude Fable 5 / Mythos 5 think on every request and reject an explicit
+# `thinking: {"type": "disabled"}` at any effort level -- the grader must not
+# send a `thinking` param to these at all. The optional `-YYYYMMDD` group
+# matches a pinned dated snapshot (e.g. "claude-fable-5-20260315") the same
+# way as the bare alias.
+_ALWAYS_THINKS = re.compile(r"^claude-(fable|mythos)-\d+(-\d{8})?$")
+
+# The "-5" model generation (Opus 5, Sonnet 5, Haiku 5, ...) thinks by default
+# but can be told not to. The family name is an explicit allowlist rather
+# than a loose `[a-z]+`, which would also match model ids from unrelated
+# families with the same shallow `family-digit` shape (e.g. "claude-instant-1")
+# that never had a thinking concept at all. Matches a bare generation number
+# or one pinned to a `-YYYYMMDD` dated snapshot, and not the dotted/multi-part
+# ids (`claude-haiku-4-5`, `claude-opus-4-6`, ...), which already default to
+# no thinking and need no extra kwargs here.
+_THINKS_BY_DEFAULT = re.compile(r"^claude-(opus|sonnet|haiku)-\d+(-\d{8})?$")
+
+
+def _grader_request_kwargs(model: str, base_max_tokens: int = GRADER_MAX_TOKENS) -> dict:
+    """All extra `messages.create` kwargs for a grader call, keyed by model alone.
+
+    This is the single place that decides how a thinking-by-default Claude
+    model is handled -- `max_tokens` and the `thinking`/`output_config` kwargs
+    used to be decided in two separate places (this classification, and a
+    second one at the call site), which could silently desync if either was
+    edited without updating the other. The grader's job is a plain pass/fail
+    classification -- it never needs extended thinking, and `grade_one`
+    assumes the reply is a JSON text block. Older models (haiku-4-5,
+    sonnet-4-6, the 4.x Opus/Sonnet line) already run with thinking off by
+    default, so they get `base_max_tokens` unchanged. The "-5" generation
+    thinks by default, so explicitly turn it back off. Fable 5 / Mythos 5
+    can't turn thinking off at all -- omit `thinking` for those, keep it
+    shallow with a low effort, and double `base_max_tokens` since thinking
+    and the reply share it (see `grade_one`'s response parsing, which scans
+    past leading thinking blocks instead of assuming the reply is
+    `content[0]`).
+    """
+    if _ALWAYS_THINKS.match(model):
+        return {"max_tokens": base_max_tokens * 2, "output_config": {"effort": "low"}}
+    if _THINKS_BY_DEFAULT.match(model):
+        return {"max_tokens": base_max_tokens, "thinking": {"type": "disabled"}}
+    return {"max_tokens": base_max_tokens}
 
 
 _AGENT_SIGNALS = (
@@ -421,6 +464,7 @@ def grade_one(
     examples_block: str,
     skill_content: str = "",
     workdir_content: str = "",
+    max_tokens: int = GRADER_MAX_TOKENS,
 ) -> dict[str, Any]:
     conv_str = conversation.get("conversation_md", "")
 
@@ -484,22 +528,33 @@ def grade_one(
 
     response = client.messages.create(
         model=model,
-        max_tokens=GRADER_MAX_TOKENS,
         messages=[{"role": "user", "content": prompt}],
+        **_grader_request_kwargs(model, max_tokens),
     )
 
     # The SDK's content blocks are a discriminated union; only TextBlock has
-    # .text. Grader prompts don't use tools or thinking, so the first block is
-    # always TextBlock at runtime — narrow explicitly so the type checker is
-    # happy and any future drift (e.g. enabling thinking) fails loudly instead
-    # of silently.
-    first_block = response.content[0]
-    if not isinstance(first_block, TextBlock):
+    # .text. Grader prompts don't use tools, but models that think by default
+    # (and can't be told not to, e.g. Fable 5 / Mythos 5) legitimately prepend
+    # one or more thinking blocks — tolerate those specifically instead of
+    # assuming content[0] is the reply, but still fail loudly on anything else
+    # (e.g. a tool_use block, which would mean something is misconfigured).
+    text_block = None
+    for block in response.content:
+        if isinstance(block, TextBlock):
+            text_block = block
+            break
+        if not isinstance(block, (ThinkingBlock, RedactedThinkingBlock)):
+            raise RuntimeError(
+                f"Grader response contained an unexpected {type(block).__name__} block. "
+                "Did someone enable tool use on the grader call?"
+            )
+    if text_block is None:
         raise RuntimeError(
-            f"Grader response first block was {type(first_block).__name__}, expected TextBlock. "
-            "Did someone enable thinking or tool use on the grader call?"
+            "Grader response contained only thinking blocks, no text reply. The model "
+            "likely spent its entire max_tokens budget thinking before producing any "
+            "output — try raising --max-tokens or lowering the grading model's effort."
         )
-    text = first_block.text.strip()
+    text = text_block.text.strip()
     if text.startswith("```"):
         lines = text.split("\n")
         # Remove opening fence (```json, ```, etc.)
@@ -522,6 +577,55 @@ def grade_one(
     return grade
 
 
+def _grade_conversation_safely(
+    client: Anthropic,
+    model: str,
+    task: dict,
+    conversation: dict,
+    examples_block: str,
+    skill_content: str,
+    workdir_content: str,
+    label: str,
+    max_tokens: int = GRADER_MAX_TOKENS,
+) -> dict[str, Any]:
+    """Call grade_one, turning any exception into a FAIL grade instead of propagating it.
+
+    main()'s loop grades every conversation in a results dir before writing
+    grades.json once at the end -- an uncaught exception from grade_one on
+    one file would abort the whole run and discard every grade already
+    computed for it. This used to be a low-risk assumption (grade_one's few
+    ways to raise were essentially unreachable), but a thinking-by-default
+    model can genuinely raise if it exhausts its budget on thinking before
+    producing any text, so the call is now guarded.
+
+    Auth/permission errors are deliberately excluded from that guard: a bad
+    or revoked API key fails the same way on every remaining conversation, so
+    swallowing it here would grind through the whole batch producing a wall
+    of identical misleading FAIL grades instead of surfacing the real
+    problem once, immediately -- the way the CLI already did before this
+    wrapper existed.
+    """
+    try:
+        return grade_one(client, model, task, conversation, examples_block, skill_content, workdir_content, max_tokens)
+    except (AuthenticationError, PermissionDeniedError):
+        raise
+    except Exception as e:
+        console.print(f"[red]Grader call failed for {label}: {e}[/red]")
+        return {
+            "pass": False,
+            "proposed_command": "",
+            "evidence": "",
+            "reasoning": f"Grader call raised {type(e).__name__}: {e}",
+            "suggestions": [
+                {
+                    "cause": f"grade_one() raised {type(e).__name__} instead of returning a grade.",
+                    "fix": "Re-run `cultivar grade` for this results dir once the cause is fixed — "
+                    "other conversations' grades in this run were not affected.",
+                }
+            ],
+        }
+
+
 def _salvage_truncated_grade(text: str) -> dict:
     """Best-effort field extraction when the grader's JSON is malformed/truncated.
 
@@ -542,7 +646,7 @@ def _salvage_truncated_grade(text: str) -> dict:
             "reasoning": (
                 "Grader response exceeded max_tokens or was malformed; recovered "
                 "the pass/fail verdict from the start of the JSON. Evidence and "
-                "reasoning fields lost — bump GRADER_MAX_TOKENS or tighten the "
+                "reasoning fields lost — pass a higher --max-tokens or tighten the "
                 "criteria's evidence cap if this recurs."
             ),
         }
@@ -586,6 +690,14 @@ def main(
         help="Skill name for loading SKILL.md + calibration examples. Auto-detected from <results_dir>/tasks.json if omitted.",
     ),
     model: str = typer.Option(DEFAULT_MODEL, help=f"Anthropic model id for grading. Default: {DEFAULT_MODEL}."),
+    max_tokens: int = typer.Option(
+        GRADER_MAX_TOKENS,
+        "--max-tokens",
+        help=(
+            "Max tokens for each grader reply. Doubled automatically for models that "
+            f"can't disable thinking (e.g. claude-fable-5). Default: {GRADER_MAX_TOKENS}."
+        ),
+    ),
     report: bool = typer.Option(
         True, help="Print the report after grading. Use --no-report to only write grades.json."
     ),
@@ -617,6 +729,7 @@ def main(
       cultivar grade latest --model claude-sonnet-4-6        # use a stronger grader
       cultivar grade latest --no-report                      # write grades.json, skip the report
       cultivar grade latest --fail-under 80                  # exit 1 if with-skill pass rate < 80%
+      cultivar grade latest --max-tokens 8192                 # give the grader more room per reply
 
     See docs/grader.md for prompt structure and calibration tips.
     """
@@ -723,7 +836,17 @@ def main(
                 examples_block = load_examples(skill, task_id=task_id)
                 workdir = conv_file.parent / f"{conv_file.stem}.workdir"
                 workdir_content = load_workdir_files(workdir)
-                grade = grade_one(client, model, task, conversation, examples_block, skill_content, workdir_content)
+                grade = _grade_conversation_safely(
+                    client,
+                    model,
+                    task,
+                    conversation,
+                    examples_block,
+                    skill_content,
+                    workdir_content,
+                    label=f"{task_id} / {runner_name}/{variant}",
+                    max_tokens=max_tokens,
+                )
 
             # Extract run stats from the JSON output
             usage = conversation.get("usage") or {}

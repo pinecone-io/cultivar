@@ -90,7 +90,9 @@ Two pre-API short-circuits to avoid hallucinated grades:
 - Empty/no-signal conversation → autofail before the call.
 - `category: code-gen` with an empty workdir → autofail before the call.
 
-If the model truncates its JSON mid-evidence, `_salvage_truncated_grade()` regex-extracts the verdict so a real PASS doesn't become a fake FAIL. `GRADER_MAX_TOKENS = 4096`.
+If the model truncates its JSON mid-evidence, `_salvage_truncated_grade()` regex-extracts the verdict so a real PASS doesn't become a fake FAIL. Default reply budget is `--max-tokens 4096` (doubled automatically for models that can't disable thinking, e.g. `claude-fable-5`); raise it if truncation recurs.
+
+If a single grading call raises, `_grade_conversation_safely()` turns it into a FAIL grade instead of aborting the rest of the run.
 
 Full prompt anatomy + calibration mechanics: [docs/grader.md](../docs/grader.md).
 

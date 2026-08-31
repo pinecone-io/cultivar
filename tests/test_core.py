@@ -1017,6 +1017,257 @@ class TestEmptyTraceAutofail:
         assert self.has(md) is True
 
 
+def _fake_anthropic_client(content):
+    """A minimal stand-in for anthropic.Anthropic() that records the kwargs
+    passed to messages.create and returns a canned response."""
+
+    class FakeResponse:
+        def __init__(self, content):
+            self.content = content
+
+    class FakeMessages:
+        def __init__(self):
+            self.calls = []
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            return FakeResponse(content)
+
+    class FakeClient:
+        def __init__(self):
+            self.messages = FakeMessages()
+
+    return FakeClient()
+
+
+class TestGraderRequestKwargs:
+    """_grader_request_kwargs: model-aware handling of Claude's thinking-by-default models.
+
+    This is the single source of truth for both the thinking-related kwargs
+    and max_tokens -- grade_one no longer re-derives either separately.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        try:
+            from evals.framework.grader import _grader_request_kwargs
+
+            self.kwargs = _grader_request_kwargs
+        except ImportError:
+            pytest.skip("anthropic SDK not installed")
+
+    def test_older_dated_model_gets_base_max_tokens_only(self):
+        assert self.kwargs("claude-haiku-4-5-20251001") == {"max_tokens": 4096}
+        assert self.kwargs("claude-opus-4-6") == {"max_tokens": 4096}
+
+    def test_bare_five_series_model_disables_thinking(self):
+        assert self.kwargs("claude-opus-5") == {"max_tokens": 4096, "thinking": {"type": "disabled"}}
+        assert self.kwargs("claude-sonnet-5") == {"max_tokens": 4096, "thinking": {"type": "disabled"}}
+
+    def test_fable_and_mythos_get_low_effort_and_doubled_budget(self):
+        expected = {"max_tokens": 8192, "output_config": {"effort": "low"}}
+        assert self.kwargs("claude-fable-5") == expected
+        assert self.kwargs("claude-mythos-5") == expected
+
+    def test_pinned_dated_snapshot_of_a_five_series_model_still_matches(self):
+        assert self.kwargs("claude-opus-5-20260315") == {"max_tokens": 4096, "thinking": {"type": "disabled"}}
+        assert self.kwargs("claude-fable-5-20260315") == {
+            "max_tokens": 8192,
+            "output_config": {"effort": "low"},
+        }
+
+    def test_unrelated_legacy_model_id_is_not_misclassified(self):
+        """claude-instant-1 has the same shallow family-digit shape as
+        claude-opus-5 but is a different, older family that never had a
+        thinking concept -- it must fall through to plain max_tokens."""
+        assert self.kwargs("claude-instant-1") == {"max_tokens": 4096}
+
+    def test_custom_base_max_tokens_is_respected_and_doubled_where_needed(self):
+        assert self.kwargs("claude-haiku-4-5-20251001", 2000) == {"max_tokens": 2000}
+        assert self.kwargs("claude-opus-5", 2000) == {"max_tokens": 2000, "thinking": {"type": "disabled"}}
+        assert self.kwargs("claude-fable-5", 2000) == {"max_tokens": 4000, "output_config": {"effort": "low"}}
+
+
+class TestGradeOneThinkingModels:
+    """grade_one: request shape and response parsing across model families."""
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        try:
+            from anthropic.types import RedactedThinkingBlock, TextBlock, ThinkingBlock, ToolUseBlock
+
+            from evals.framework.grader import grade_one
+
+            self.grade_one = grade_one
+            self.TextBlock = TextBlock
+            self.ThinkingBlock = ThinkingBlock
+            self.RedactedThinkingBlock = RedactedThinkingBlock
+            self.ToolUseBlock = ToolUseBlock
+        except ImportError:
+            pytest.skip("anthropic SDK not installed")
+
+    def _fake_client(self, content):
+        return _fake_anthropic_client(content)
+
+    def _task_and_conversation(self):
+        task = {"ground_truth": {"criteria": "test"}}
+        conversation = {"conversation_md": "**Assistant:** did the thing"}
+        return task, conversation
+
+    def test_five_series_model_disables_thinking(self):
+        client = self._fake_client([self.TextBlock(type="text", text='{"pass": true}')])
+        task, conversation = self._task_and_conversation()
+        self.grade_one(client, "claude-opus-5", task, conversation, examples_block="")
+        call = client.messages.calls[0]
+        assert call["thinking"] == {"type": "disabled"}
+        assert call["max_tokens"] == 4096
+
+    def test_always_thinking_model_skips_thinking_param_and_parses_past_it(self):
+        content = [
+            self.ThinkingBlock(type="thinking", thinking="", signature="sig"),
+            self.TextBlock(type="text", text='{"pass": true}'),
+        ]
+        client = self._fake_client(content)
+        task, conversation = self._task_and_conversation()
+        grade = self.grade_one(client, "claude-fable-5", task, conversation, examples_block="")
+        call = client.messages.calls[0]
+        assert "thinking" not in call
+        assert call["output_config"] == {"effort": "low"}
+        assert call["max_tokens"] == 8192
+        assert grade["pass"] is True
+
+    def test_older_model_omits_thinking_kwargs(self):
+        client = self._fake_client([self.TextBlock(type="text", text='{"pass": false}')])
+        task, conversation = self._task_and_conversation()
+        grade = self.grade_one(client, "claude-haiku-4-5-20251001", task, conversation, examples_block="")
+        call = client.messages.calls[0]
+        assert "thinking" not in call
+        assert "output_config" not in call
+        assert grade["pass"] is False
+
+    def test_response_with_only_thinking_blocks_raises(self):
+        content = [self.ThinkingBlock(type="thinking", thinking="", signature="sig")]
+        client = self._fake_client(content)
+        task, conversation = self._task_and_conversation()
+        with pytest.raises(RuntimeError, match="only thinking blocks"):
+            self.grade_one(client, "claude-fable-5", task, conversation, examples_block="")
+
+    def test_redacted_thinking_block_is_also_tolerated(self):
+        content = [
+            self.RedactedThinkingBlock(type="redacted_thinking", data="encrypted"),
+            self.TextBlock(type="text", text='{"pass": true}'),
+        ]
+        client = self._fake_client(content)
+        task, conversation = self._task_and_conversation()
+        grade = self.grade_one(client, "claude-fable-5", task, conversation, examples_block="")
+        assert grade["pass"] is True
+
+    def test_custom_max_tokens_is_threaded_through(self):
+        client = self._fake_client([self.TextBlock(type="text", text='{"pass": true}')])
+        task, conversation = self._task_and_conversation()
+        self.grade_one(client, "claude-opus-5", task, conversation, examples_block="", max_tokens=1024)
+        call = client.messages.calls[0]
+        assert call["max_tokens"] == 1024
+
+    def test_tool_use_block_before_text_still_raises_loudly(self):
+        """A tool_use block means something is misconfigured (the grader call
+        never passes tools=) -- unlike thinking blocks, it must not be
+        silently skipped over on the way to the trailing text block."""
+        content = [
+            self.ToolUseBlock(type="tool_use", id="toolu_1", name="some_tool", input={}),
+            self.TextBlock(type="text", text='{"pass": true}'),
+        ]
+        client = self._fake_client(content)
+        task, conversation = self._task_and_conversation()
+        with pytest.raises(RuntimeError, match="unexpected ToolUseBlock"):
+            self.grade_one(client, "claude-haiku-4-5-20251001", task, conversation, examples_block="")
+
+
+class TestGradeConversationSafely:
+    """_grade_conversation_safely: a grader crash must not blow up the whole batch."""
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        try:
+            from anthropic.types import ThinkingBlock
+
+            from evals.framework.grader import _grade_conversation_safely
+
+            self.safe_grade = _grade_conversation_safely
+            self.ThinkingBlock = ThinkingBlock
+        except ImportError:
+            pytest.skip("anthropic SDK not installed")
+
+    def test_grade_one_exception_becomes_a_fail_grade(self):
+        """A thinking-only response with no text (see TestGradeOneThinkingModels
+        above) makes grade_one raise -- the wrapper must catch it and return a
+        FAIL grade instead of letting it propagate out of main()'s loop."""
+        content = [self.ThinkingBlock(type="thinking", thinking="", signature="sig")]
+        client = _fake_anthropic_client(content)
+        task = {"ground_truth": {"criteria": "test"}}
+        conversation = {"conversation_md": "**Assistant:** did the thing"}
+
+        grade = self.safe_grade(
+            client, "claude-fable-5", task, conversation, "", "", "", label="my-task / claude/with-skill"
+        )
+
+        assert grade["pass"] is False
+        assert "RuntimeError" in grade["reasoning"]
+        assert grade["suggestions"]
+
+    def test_auth_error_is_not_swallowed(self):
+        """A bad/revoked API key fails identically on every remaining
+        conversation -- it must still crash the run immediately instead of
+        producing a wall of misleading per-conversation FAIL grades."""
+        import httpx
+        from anthropic import AuthenticationError
+
+        class FailingMessages:
+            def create(self, **kwargs):
+                request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+                response = httpx.Response(401, request=request)
+                raise AuthenticationError("invalid x-api-key", response=response, body=None)
+
+        class FailingClient:
+            def __init__(self):
+                self.messages = FailingMessages()
+
+        task = {"ground_truth": {"criteria": "test"}}
+        conversation = {"conversation_md": "**Assistant:** did the thing"}
+
+        with pytest.raises(AuthenticationError):
+            self.safe_grade(
+                FailingClient(), "claude-haiku-4-5-20251001", task, conversation, "", "", "", label="task/x"
+            )
+
+    def test_successful_grade_passes_through_unchanged(self):
+        from anthropic.types import TextBlock
+
+        client = _fake_anthropic_client([TextBlock(type="text", text='{"pass": true}')])
+        task = {"ground_truth": {"criteria": "test"}}
+        conversation = {"conversation_md": "**Assistant:** did the thing"}
+
+        grade = self.safe_grade(client, "claude-haiku-4-5-20251001", task, conversation, "", "", "", label="task/x")
+
+        assert grade["pass"] is True
+
+
+class TestGradeCliMaxTokensFlag:
+    """`cultivar grade --max-tokens` is wired up on the CLI, not just grade_one()."""
+
+    def test_max_tokens_flag_is_registered(self):
+        # Inspect the registered click command directly rather than parsing
+        # rendered --help text -- Rich wraps that output differently
+        # depending on terminal width, which made this flaky in CI.
+        import typer
+
+        from evals.cli import app
+
+        grade_command = typer.main.get_command(app).commands["grade"]
+        option_names = {opt for param in grade_command.params for opt in param.opts}
+        assert "--max-tokens" in option_names
+
+
 class TestCodeGenEmptyWorkdirAutofail:
     """grade_one autofails code-gen tasks whose workdir is empty — no file =
     no deliverable, regardless of how good the conversation looked."""
