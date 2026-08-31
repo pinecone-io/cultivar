@@ -30,11 +30,9 @@ when no `ANTHROPIC_API_KEY` is available) — it runs a packaged smoke task end-
   - `--remote` run in isolated Modal sandboxes · `-n N` repeat · `-p N` parallelism
   - `--grade` grade after running · `--title NAME` label the run · `--dry-run` print the
     prompt + command without calling anything · `--timeout S` per-call budget (default 90)
-- `cultivar grade <run|latest> [--skill <skill>] [--no-report]` — (re)grade an existing run.
-  Skill auto-detects from the run's `tasks.json`. `--model` picks the grading model; Claude
-  4.x, the "-5" generation (opus/sonnet/haiku, bare or pinned to a dated snapshot), and
-  Fable/Mythos 5 all work · `--max-tokens` raises the per-reply budget (default 4096) if
-  evidence/reasoning truncate.
+- `cultivar grade <run|latest> -s <skill> [--report]` — (re)grade an existing run.
+  `--model` picks the grading model (any current Claude model works, including the "-5"
+  generation) · `--max-tokens` raises the per-reply budget if evidence/reasoning truncate.
 - `cultivar report [run]` — summary table across runners/variants.
 - `cultivar show <run|latest> -t <task> [--grader|--conversation-only|--workdir]` — inspect one run.
 
