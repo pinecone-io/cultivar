@@ -100,5 +100,7 @@ grader's reasoning + suggestions on a failure.
 
 - Grading needs `ANTHROPIC_API_KEY` (loaded from a `.env` in the cwd). `hello --no-grade`
   and `run --dry-run` need no key.
+- A grader call that fails is recorded as a FAIL for that conversation and the run
+  continues. Auth and permission errors abort the whole grading run immediately.
 - `tasks/`, `examples/`, and `results/` are cwd-relative and user-owned.
-- One run is a sample, not a signal — use `-n 3` (or more) for anything you'll act on.
+- One run is a sample. Use `-n 3` (or more) for anything you'll act on.
