@@ -23,7 +23,7 @@ Per (task, variant, repeat), one sandbox:
 | **setup** | `task.setup` shell command, if defined | `*.setup.log` (failure aborts the run) |
 | **eval** | `entry.py` → real runner class → JSON result on stdout | `sandbox_timing.eval_s` |
 | **verify** | `task.verify` shell command, if defined; stdout passed to grader | `*.verify.log`; stdout in `result.verify_output` |
-| **workdir capture** | `find /workspace/app -type f` + per-file `sb.open(path, "rb").read()` → local `write_bytes` | `*.workdir/` |
+| **workdir capture** | `find /workspace/app -type f` + per-file `sb.filesystem.read_bytes(path)` → local `write_bytes` | `*.workdir/` |
 | **teardown** | `task.teardown` shell command, if defined | `*.teardown.log` |
 | **terminate** | `sb.terminate()` (in `finally`) | always runs |
 
@@ -44,6 +44,7 @@ Set with `--timeout <seconds>` (default `90`). That value is the **agent CLI bud
 | Modal app name | `cultivar` by default; override with `CULTIVAR_MODAL_APP` env var |
 | Parallelism | `--parallel N` (default 5) |
 | Repeats | `--repeat N` |
+| Model | `--model <name>` (Claude runner only; Copilot/Gemini accept and ignore it) |
 | Per-call timeout | `--timeout <seconds>` (default 90; sandbox gets +60s buffer) |
 
 

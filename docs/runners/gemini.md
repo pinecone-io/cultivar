@@ -31,7 +31,7 @@ If the orchestrator passes a `cwd` (the per-task tempdir), every variant uses it
 
 ## Quirks
 
-- `gemini skills link` is interactive — we pipe `"Y\n"` and a 30s timeout. Failures are swallowed (skill may already be linked from a previous run).
+- `gemini skills link` is interactive. We pipe `"Y\n"` with a 30s timeout. A timeout or non-zero exit is swallowed (skill may already be linked from a previous run). If the `gemini` CLI itself is missing, the run aborts immediately with a `gemini_cli_not_found` error.
 - No turn limit flag, so `--max-turns` translates to a subprocess timeout, not a hard cap on agent turns.
 - Event schema differs from Claude: looks for `type=message`, `tool_use`, `tool_result`, `result`, plus stats under `result.stats` with field names like `tool_calls`, `input_tokens`, `output_tokens`, `cached`.
 

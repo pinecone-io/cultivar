@@ -10,25 +10,29 @@ LLM-based grader that scores runner conversations against natural-language crite
 
 ## Required env
 
-`ANTHROPIC_API_KEY`. Drop it in `.env` (cwd) — auto-loaded.
+`ANTHROPIC_API_KEY`. Drop it in `.env` in your cwd. It's auto-loaded.
 
 ## Model
 
-Default: `claude-haiku-4-5-20251001`. Override with `--model claude-…` — any current Claude model works, including the "-5" generation (`claude-opus-5`, `claude-sonnet-5`, optionally pinned to a dated snapshot like `claude-opus-5-20260315`) and Fable/Mythos 5, which think by default. The grader classifies the model from its id alone and adjusts the request so the reply is still plain JSON text:
+Default: `claude-haiku-4-5-20251001`. Override with `--model claude-…`. Any current Claude model works, including the "-5" generation (`claude-opus-5`, `claude-sonnet-5`, `claude-haiku-5`, optionally pinned to a dated snapshot like `claude-opus-5-20260315`) and Fable/Mythos 5, which always think and can't turn it off. The grader classifies the model from its id alone and adjusts the request so the reply is still plain JSON text:
 
-- Older models (`claude-haiku-4-5`, `claude-sonnet-4-6`, the 4.x Opus/Sonnet line) already default to no thinking — nothing changes for them.
-- Bare or dated "-5" models (`claude-opus-5`, `claude-sonnet-5`, `claude-opus-5-20260315`, …) think by default, so the grader explicitly sends `thinking: {"type": "disabled"}`.
-- `claude-fable-5` / `claude-mythos-5` (and their dated snapshots) can't disable thinking at all — the grader omits the `thinking` param, runs at `effort: low` to keep thinking shallow, and doubles `--max-tokens` since thinking and the JSON reply share the same budget.
+- Older models (`claude-haiku-4-5`, `claude-sonnet-4-6`, the 4.x Opus/Sonnet line) already default to no thinking. Nothing changes for them.
+- Bare or dated "-5" models (`claude-opus-5`, `claude-sonnet-5`, `claude-haiku-5`, `claude-opus-5-20260315`, …) think by default, so the grader explicitly sends `thinking: {"type": "disabled"}`.
+- `claude-fable-5` / `claude-mythos-5` (and their dated snapshots) can't disable thinking at all. The grader omits the `thinking` param, runs at `effort: low` to keep thinking shallow, and doubles `--max-tokens` since thinking and the JSON reply share the same budget.
 
-Response parsing scans past leading `thinking`/`redacted_thinking` blocks for the first text block instead of assuming it's `content[0]`, but still raises loudly on any other unexpected block type (e.g. `tool_use` — this call never passes tools, so seeing one means something is misconfigured).
+Response parsing scans past leading `thinking`/`redacted_thinking` blocks for the first text block instead of assuming it's `content[0]`. It still raises loudly on any other unexpected block type, e.g. `tool_use`, since this call never passes tools and seeing one means something is misconfigured.
 
 ## Max tokens
 
-`--max-tokens` (default `4096`) caps each grader reply. Raise it if `evidence`/`reasoning` are getting truncated — check `grades.json` for a `reasoning` mentioning `_salvage_truncated_grade`'s header-only recovery — or if you're using a model whose thinking can't be disabled; those already get double whatever value you pass here.
+`--max-tokens` (default `4096`) caps each grader reply.
+
+Raise it if `evidence`/`reasoning` are getting truncated. Check `grades.json` for a `reasoning` mentioning `_salvage_truncated_grade`'s header-only recovery. Models that can't disable thinking (`claude-fable-5`, `claude-mythos-5`) already get double whatever value you pass here.
 
 ## Grader call failures
 
-If a single conversation's grading call raises (e.g. a thinking-only model exhausts `--max-tokens` before producing any text), it no longer aborts the whole run. `_grade_conversation_safely` converts the exception into a normal FAIL grade with a `cause`/`fix` suggestion naming the error, prints a warning, and the rest of the batch continues — only that one entry needs a re-grade.
+If a single conversation's grading call raises (e.g. a thinking-only model exhausts `--max-tokens` before producing any text), it no longer aborts the whole run. `_grade_conversation_safely` converts the exception into a normal FAIL grade with a `cause`/`fix` suggestion naming the error, prints a warning, and the batch continues. Only that one entry needs a re-grade.
+
+Exception: `AuthenticationError` and `PermissionDeniedError` (a bad or revoked API key) still propagate and crash the run immediately. That failure repeats identically on every remaining conversation, so surfacing it once beats grinding through the batch producing a wall of duplicate FAIL grades.
 
 ## Prompt anatomy
 
@@ -37,7 +41,7 @@ The grader prompt is assembled in this order ([`build_grader_prompt`](../evals/f
 1. **Skill reference** — full `SKILL.md` of `--skill` (auto-detected from `tasks.json` if not passed)
 2. **Criteria** — `task.ground_truth.criteria` verbatim
 3. **Expected** — `commands`, `flexible`, `outcome` (each line if present)
-4. **Reference material** — files listed in `task.ground_truth.context_refs` (cwd-relative paths), included verbatim. Capped at 100 KB combined; missing files warn + skip. Treated as ground truth for "what correct behavior looks like" — the grader can use it to judge specifics but isn't allowed to quote from it as evidence (evidence must come from the actual run). See [docs/task-yaml.md#worked-example-context_refs](task-yaml.md#worked-example-context_refs).
+4. **Reference material** — files listed in `task.ground_truth.context_refs` (cwd-relative paths), included verbatim. Capped at 100 KB combined; missing files warn + skip. Treated as ground truth for "what correct behavior looks like": the grader can use it to judge specifics but can't quote from it as evidence (evidence must come from the actual run). See [docs/task-yaml.md#worked-example-context_refs](task-yaml.md#worked-example-context_refs).
 5. **Calibration examples** — pass/fail YAMLs filtered by `task_id`
 6. **Agent conversation** — `conversation_md` truncated at 50 KB
 7. **Verification output** — stdout of `task.verify` if defined
@@ -50,9 +54,9 @@ The grader prompt is assembled in this order ([`build_grader_prompt`](../evals/f
 - **Included names:** `Dockerfile Makefile requirements.txt pyproject.toml package.json .env.example`
 - **Skipped dirs:** `__pycache__ node_modules .venv .git dist build`
 - **Skipped files:** `*.lock`
-- **Cap:** 40 KB total — files truncated or omitted past the cap, with a note appended
+- **Cap:** 40 KB total. Files truncated or omitted past the cap, with a note appended.
 
-Empty or missing workdirs contribute nothing — the section is omitted from the prompt entirely.
+Empty or missing workdirs contribute nothing. The section is omitted from the prompt entirely.
 
 ## `context_refs` is dual-use
 
@@ -73,12 +77,12 @@ reasoning: |
   why this passes (or fails) the criteria
 ```
 
-**Filtering.** Examples are filtered by `task_id` — only examples matching the active task are included. This keeps prompts small and on-topic.
+**Filtering.** Examples are filtered by `task_id`. Only examples matching the active task are included, keeping prompts small and on-topic.
 
 **Authoring tips:**
-- Pin examples to *real* runs, not hypotheticals. The closer to actual runner output, the better the calibration.
+- Pin examples to *real* runs. Skip hypotheticals. The closer to actual runner output, the better the calibration.
 - Write `reasoning` from the grader's perspective: "passes because…" / "fails because…", citing the criteria.
-- Add a fail example *before* tightening criteria — it teaches the grader the failure mode without you having to over-specify.
+- Add a fail example *before* tightening criteria. It teaches the grader the failure mode without over-specifying.
 
 **Promoting a run to an example.** Copy the relevant conversation or workdir content into an example YAML by hand for now.
 
@@ -101,7 +105,7 @@ reasoning: |
 
 ## Re-grading
 
-`cultivar grade latest --report` re-grades without re-running the agents. Use this loop when iterating on `criteria` or adding calibration examples — it's cheap (one Haiku call per task) and fast.
+`cultivar grade latest --report` re-grades without re-running the agents. Use this loop when iterating on `criteria` or adding calibration examples. It's cheap (one Haiku call per task) and fast.
 
 ## Sources
 

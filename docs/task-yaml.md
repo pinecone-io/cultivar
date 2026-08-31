@@ -21,7 +21,7 @@ That's it. No version, no metadata. The list under `tasks:` is what gets loaded.
 |---|---|---|---|
 | `id` | yes | string | Unique within the file. Used by `--task <id>` filter and as the result base name (`<id>__<variant>.json`). |
 | `intent` | yes | string | The user prompt sent to the agent. With-skill variant prepends `Use the /<skill> skill. ` |
-| `category` | no | string | Tag for `--category <name>` filtering. Free-form. |
+| `category` | no | string | Tag for `--category <name>` filtering. Free-form, with one special value: `code-gen`. If set, the grader autofails the task when the captured workdir is empty, without calling the API. |
 | `setup` | no | string (shell) | Runs before the agent. Locally: in your shell. Remote: inside the sandbox. Non-zero exit aborts the run. |
 | `teardown` | no | string (shell) | Runs after the agent (and after `verify`). Same exec context as `setup`. |
 | `verify` | no | string (shell) | Runs after the agent. Stdout is captured into `result.verify_output` and **fed to the grader** under "Verification Output". Use this to check post-run state (e.g. `pc index stats my-test-index`). |
@@ -33,7 +33,7 @@ That's it. No version, no metadata. The list under `tasks:` is what gets loaded.
 
 | Field | Required | Type | What it does |
 |---|---|---|---|
-| `criteria` | yes (within ground_truth) | string (multi-line) | Free-form PASS/FAIL description. The grader's primary input. Be specific. |
+| `criteria` | no (but grading is meaningless without it) | string (multi-line) | Free-form PASS/FAIL description. The grader's primary input. If missing, the grader sees "(no specific criteria provided)". Be specific. |
 | `commands` | no | list of strings | Expected commands the agent should run. Surfaced to the grader as a hint. |
 | `flexible` | no | list of strings | Notes about acceptable variation (e.g. `"single or double quotes ok"`, `"file extension can be .py or .pyw"`). |
 | `outcome` | no | string | Short description of expected end state. Surfaced to the grader. |
@@ -88,7 +88,7 @@ tasks:
     category: code-gen
 ```
 
-The agent runs in a per-task tempdir; anything it writes is captured to `results/<run>/<runner>/<id>__<variant>.workdir/` and fed to the grader.
+The agent runs in a per-task tempdir; anything it writes is captured to `results/<run>/<runner>/<id>__<variant>.workdir/` and fed to the grader. With `category: code-gen`, an empty workdir autofails the task before the grader API is even called.
 
 ## Where the YAML lives
 

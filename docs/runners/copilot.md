@@ -31,7 +31,7 @@ copilot --autopilot --yolo \
 
 | | with-skill | without-skill | with-docs |
 |---|---|---|---|
-| Prompt | `Use the /<skill> skill. <intent>` | `<intent>` | `<context_refs>\n---\n<intent>` |
+| Prompt | `Use the /<skill> skill. <intent>` | `<intent>` | `<docs_context><intent>` |
 | `--no-custom-instructions` | no | yes | yes |
 | `--excluded-tools skill` | no | yes | yes |
 

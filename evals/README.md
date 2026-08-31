@@ -2,7 +2,7 @@
 
 This is the Python package that backs the `cultivar` CLI. End-user docs live in [README.md](../README.md) (top-level) and the [docs/](../docs) tree. This file is a code-oriented orientation for anyone reading or editing the framework itself.
 
-If you just want to *use* cultivar, you're in the wrong place — start with [the top-level README](../README.md) and [docs/concepts.md](../docs/concepts.md).
+If you just want to *use* cultivar, you're in the wrong place. Start with [the top-level README](../README.md) and [docs/concepts.md](../docs/concepts.md).
 
 ## What's in here
 
@@ -28,7 +28,7 @@ evals/
   _resources/smoke/      # Packaged hello-world task + skill, shipped in the wheel
 ```
 
-`cli.py::app` is the Typer root. Subcommands are mounted via `app.command("init")(init_main)` etc. — each subcommand's `main` lives in its own module.
+`cli.py::app` is the Typer root. Subcommands are mounted via `app.command("init")(init_main)` etc. Each subcommand's `main` lives in its own module.
 
 ## The Runner contract
 
@@ -43,15 +43,19 @@ class Runner(ABC):
 
     @abstractmethod
     def build_command(
-        self, intent: str, variant: str, max_turns: int = 10, docs_context: str = ""
+        self, intent: str, variant: str, max_turns: int = 10, docs_context: str = "",
+        extra_tools: list[str] | None = None, model: str | None = None,
     ) -> tuple[list[str], str]: ...   # (argv, full_prompt) — used by --dry-run
 
     @abstractmethod
     def run(
         self, intent: str, variant: str, max_turns: int = 10,
         cwd: str | None = None, docs_context: str = "", timeout: int = 90,
+        extra_tools: list[str] | None = None, model: str | None = None,
     ) -> dict: ...
 ```
+
+`extra_tools` is the task YAML's `extra_tools:` opt-in, unioned into the variant's tool allow-list. `model` is `cultivar run --model <id>`, an orchestration-level override of the agent CLI's model. Runners with no matching mechanism (Copilot, Gemini) accept and ignore both.
 
 `run()` returns a dict whose only required key is `conversation_md` (the readable trace). Optional but recommended: `raw_events`, `session_id`, `duration_ms`, `total_cost_usd`, `num_turns`, `usage`, `stderr`, `error`.
 
@@ -61,55 +65,60 @@ To add a new runner, subclass `Runner`, register in `run.py::RUNNER_CLASSES`, an
 
 ## Local vs remote: two orchestrators, one contract
 
-Both `run_local` and `run_remote` (in `run.py`) iterate `(task × variant × repeat)` and call the same runner classes — the difference is where the subprocess lives.
+Both `run_local` and `run_remote` (in `run.py`) iterate `(task × variant × repeat)` and call the same runner classes. The difference is where the subprocess lives.
 
 **Local (`run_local`):**
 - Each iteration runs in a fresh `tempfile.TemporaryDirectory()` as the agent's cwd.
 - For `with-skill`, the skill is copied into `<tmpdir>/.claude/skills/<name>/` before the runner is called, so Claude Code / Copilot can discover it via walk-up.
-- After the runner returns, non-noise contents of the tmpdir get copied to `<runner>/<base>.workdir/`.
+- After the runner returns, non-noise contents of the tmpdir get copied to `<runner>/<base>.workdir/`. `.claude` is excluded: with-skill mounts the skill there and it isn't agent output. Without the exclusion the code-gen empty-workdir autofail (see below) wouldn't fire.
 
 **Remote (`run_remote`):**
 - Each iteration submits a `run_one_remote()` call to a `ThreadPoolExecutor` (max workers = `--parallel`, default 5).
 - `modal_runner.py` creates a fresh `modal.Sandbox` per iteration with the image, the secret named by `CULTIVAR_MODAL_SECRET` (default: `eval-sandbox-secrets`), and a `+60s` buffer on top of the agent's `--timeout`.
 - For `with-skill`, the skill is mounted into the image at `/workspace/.claude/skills/<name>/`; the agent's cwd is `/workspace/app/`.
-- `entry.py` runs inside the sandbox, imports the same `Runner` class, calls `.run()`, prints JSON to stdout. The orchestrator parses that and pulls workdir files out via per-file `sb.open(..., "rb").read()`.
+- `entry.py` runs inside the sandbox, imports the same `Runner` class, calls `.run()`, prints JSON to stdout. The orchestrator parses that and pulls workdir files out via per-file `sb.filesystem.read_bytes(path)`.
 
-The whole point of `entry.py` is to avoid a reimplementation: identical runner output local and remote.
+`entry.py` keeps runner output identical between local and remote runs, without a second implementation of the runner.
 
 See [docs/sandbox.md](../docs/sandbox.md) for the full lifecycle, image contents, and DIY workspace setup.
 
 ## The grader
 
-`framework/grader.py` runs **locally only** (never inside the sandbox — keeps the Anthropic key on the user's machine). For each conversation in a run dir, it:
+`framework/grader.py` runs **locally only**. It never runs inside the sandbox, so the Anthropic key stays on the user's machine. For each conversation in a run dir, it:
 
 1. Builds a prompt from: skill SKILL.md + task criteria + `context_refs` reference material + calibration examples + the conversation + verify output + any workdir files.
 2. Sends to Claude Haiku (or `--model`).
 3. Parses the JSON response into a grade `{pass, evidence, reasoning, suggestions, ...}`.
 
-Two pre-API short-circuits to avoid hallucinated grades:
+Two pre-API short-circuits avoid hallucinated grades:
 - Empty/no-signal conversation → autofail before the call.
 - `category: code-gen` with an empty workdir → autofail before the call.
 
-If the model truncates its JSON mid-evidence, `_salvage_truncated_grade()` regex-extracts the verdict so a real PASS doesn't become a fake FAIL. Default reply budget is `--max-tokens 4096` (doubled automatically for models that can't disable thinking, e.g. `claude-fable-5`); raise it if truncation recurs.
+Thinking-by-default models:
+- Claude's "-5" generation (`claude-opus-5`, `claude-sonnet-5`, `claude-haiku-5`, including pinned `-YYYYMMDD` snapshots) thinks by default. The grader sends `thinking: {"type": "disabled"}` to turn it off.
+- Fable 5 / Mythos 5 (also including pinned `-YYYYMMDD` snapshots) can't disable thinking at all. The grader omits the `thinking` param, sets a low effort, and doubles `--max-tokens` since thinking and the reply share the same budget.
+- Older models (haiku-4-5, sonnet-4-6, the 4.x Opus/Sonnet line) already default to no thinking and need no special handling.
 
-If a single grading call raises, `_grade_conversation_safely()` turns it into a FAIL grade instead of aborting the rest of the run.
+If the model truncates its JSON mid-evidence, `_salvage_truncated_grade()` regex-extracts the verdict so a real PASS doesn't become a fake FAIL. Default reply budget is `--max-tokens 4096`; raise it if truncation recurs.
+
+If a single grading call raises, `_grade_conversation_safely()` records a FAIL grade for that conversation instead of aborting the rest of the run. Auth/permission errors are the exception: those crash the run immediately, since a bad or revoked key fails the same way on every remaining conversation.
 
 Full prompt anatomy + calibration mechanics: [docs/grader.md](../docs/grader.md).
 
 ## Variants
 
-Three of them: `with-skill`, `without-skill`, `with-docs`. The third auto-activates when a task declares `ground_truth.context_refs: [...]`; otherwise it's skipped. The same `context_refs` files are used in *two* places — the grader prompt (as authoritative reference) and the with-docs runner prompt (prepended to the intent). See [docs/concepts.md#the-controls-with-skill-without-skill-with-docs](../docs/concepts.md#the-controls-with-skill-without-skill-with-docs) and [docs/task-yaml.md#variants](../docs/task-yaml.md#variants).
+Three of them: `with-skill`, `without-skill`, `with-docs`. The third auto-activates when a task declares `ground_truth.context_refs: [...]`; otherwise it's skipped. The same `context_refs` files are used in two places: the grader prompt (as authoritative reference) and the with-docs runner prompt (prepended to the intent). See [docs/concepts.md#the-controls-with-skill-without-skill-with-docs](../docs/concepts.md#the-controls-with-skill-without-skill-with-docs) and [docs/task-yaml.md#variants](../docs/task-yaml.md#variants).
 
 ## Path resolution
 
-User-data paths (`tasks/`, `examples/`, `results/`, `.claude/skills/`) are **cwd-relative**, not package-relative. Defined as module-level constants in `run.py` and `framework/grader.py` so `cultivar` installed globally resolves them from wherever it's invoked. Don't reintroduce `Path(__file__).parent`-based defaults for user data — this design is what makes the tool work from a skills repo without ever cloning this one.
+User-data paths (`tasks/`, `examples/`, `results/`, `.claude/skills/`) resolve relative to the current working directory, regardless of where the package is installed. `tasks/` and `results/` are module-level constants in `run.py`, `examples/` in `framework/grader.py`. The skills root comes from `resolve_skills_base()` in `framework/reporting.py`, which honors `--skills-dir` and `CULTIVAR_SKILLS_DIR`. Don't reintroduce `Path(__file__).parent`-based defaults for user data. This design lets a globally installed `cultivar` run from a skills repo without ever cloning this one.
 
 ## Test layout
 
-`tests/test_core.py` covers loaders, env validation, save_result, grader prompt construction + autofail short-circuits, calibration filtering, workdir filtering, packaged smoke resources, and orchestrator call-surface guards (AST-based check that `hello.py`'s calls to `run_local`/`run_remote` still match their signatures — the bug class that hit us once).
+`tests/test_core.py` covers loaders, env validation, save_result, grader prompt construction + autofail short-circuits, calibration filtering, workdir filtering, packaged smoke resources, and orchestrator call-surface guards. The last is an AST-based check that `hello.py`'s calls to `run_local`/`run_remote` still match their signatures, catching the bug class that hit us once.
 
 ```bash
-uv run pytest -q       # ~0.4s
+uv run pytest -q       # ~0.6s
 uv run ruff check .    # lint
 uv run ty check        # types
 ```

@@ -12,7 +12,7 @@ cultivar automates that comparison.
 
 ## The unit of measurement: a task
 
-A **task** is a small, self-contained jobs the agent is asked to do, plus a description of what success looks like:
+A **task** is a small, self-contained job the agent is asked to do, plus a description of what success looks like:
 
 ```yaml
 - id: list-indexes
@@ -23,7 +23,7 @@ A **task** is a small, self-contained jobs the agent is asked to do, plus a desc
       FAIL if it uses the SDK directly or invents indexes.
 ```
 
-The agent runs the task. cultivar saves the conversation. An LLM grader reads the conversation against the criteria and returns `{pass, evidence, reasoning}`.
+The agent runs the task. cultivar saves the conversation. An LLM grader reads the conversation against the criteria and returns `{pass, proposed_command, evidence, reasoning, suggestions}`.
 
 That's the atom. Everything else is composition: many tasks per skill, many runs per task, many runners.
 
