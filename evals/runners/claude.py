@@ -58,7 +58,11 @@ class ClaudeRunner(Runner):
         # re-enabling globally. A new variant ("bare-baseline") or a YAML
         # flag (`use_bare: true`) is the right shape; baking it into every
         # without-skill / with-docs run is what just bit us.
-        if variant in ("without-skill", "with-docs"):
+        if variant == "self-navigate":
+            # WebFetch scoped to this one variant, not via extra_tools, so it
+            # can't leak into without-skill/without-docs below.
+            tools = ["Bash", "Read", "Write", "Edit", "WebFetch"]
+        elif variant in ("without-skill", "without-docs", "with-docs"):
             tools = ["Bash", "Read", "Write", "Edit"]
         else:
             tools = ["Bash", "Read", "Write", "Edit", "Skill", "ToolSearch"]

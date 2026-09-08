@@ -494,9 +494,14 @@ def main(
 
     r = runner_cls(skill_dir=skill_dir_str)
     valid_variants = r.variants()
+    # Docs-eval extensions on the Claude runner: real variant names, not part
+    # of the default "run every variant" sweep, so tasks that don't ask for
+    # them (e.g. Arjun's skill tests) don't pick up extra cost by default.
+    docs_eval_variants = {"without-docs", "self-navigate"} if runner == "claude" else set()
     if variant:
-        if variant not in valid_variants:
-            typer.echo(f"Error: Unknown variant '{variant}'. Available: {valid_variants}")
+        if variant not in valid_variants and variant not in docs_eval_variants:
+            available = valid_variants + sorted(docs_eval_variants)
+            typer.echo(f"Error: Unknown variant '{variant}'. Available: {available}")
             raise typer.Exit(1)
         variants = [variant]
     else:
