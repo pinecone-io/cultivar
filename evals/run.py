@@ -180,7 +180,9 @@ def run_local(tasks, runner_cls, variants, skill_dir, max_turns, repeat, run_dir
                     )
 
                     if t.get("verify"):
-                        verify_result = subprocess.run(t["verify"], shell=True, capture_output=True, text=True)
+                        verify_result = subprocess.run(
+                            t["verify"], shell=True, capture_output=True, text=True, cwd=tmpdir
+                        )
                         result["verify_output"] = verify_result.stdout.strip()
                         result["verify_exit_code"] = verify_result.returncode
                         if verify_result.stderr.strip():

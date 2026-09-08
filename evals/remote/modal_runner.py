@@ -159,9 +159,10 @@ def run_one_remote(
                 "conversation_md": f"# Error\n\nSandbox returned invalid JSON\n```\n{stdout[:1000]}\n```\n",
             }
 
-        # Run verify inside sandbox
+        # Run verify inside sandbox, from the same dir the agent wrote files
+        # into (the sandbox's own default workdir is /workspace, not workdir_src)
         if verify:
-            p = sb.exec("bash", "-c", verify)
+            p = sb.exec("bash", "-c", f"cd {workdir_src} && {verify}")
             verify_stdout = p.stdout.read()
             verify_stderr = p.stderr.read()
             p.wait()
