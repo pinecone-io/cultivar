@@ -100,6 +100,21 @@ def docs_context_for_task(task: dict) -> str:
     return load_runner_refs(refs)
 
 
+def self_navigate_context_for_task(task: dict) -> str:
+    """Resolve the self-navigate prompt prefix for a task, or empty string.
+
+    Distinct from context_refs/docs_context (the with-docs variant's full
+    reference set): self-navigate should get only a starting point, not the
+    answer, so it comes from its own `self_navigate_refs` field.
+    """
+    refs = task.get("ground_truth", {}).get("self_navigate_refs") or []
+    if not refs:
+        return ""
+    from evals.framework.grader import load_runner_refs
+
+    return load_runner_refs(refs)
+
+
 def validate_env_vars(tasks: list[dict]):
     """Check all required env vars upfront before running anything."""
     missing = {}
@@ -124,6 +139,7 @@ def run_local(tasks, runner_cls, variants, skill_dir, max_turns, repeat, run_dir
 
     for t in tasks:
         docs_context = docs_context_for_task(t)
+        self_navigate_context = self_navigate_context_for_task(t)
         for v in variants_for_task(t, variants):
             runner_dir = run_dir / r.name
             runner_dir.mkdir(parents=True, exist_ok=True)
@@ -173,7 +189,9 @@ def run_local(tasks, runner_cls, variants, skill_dir, max_turns, repeat, run_dir
                         v,
                         max_turns=max_turns,
                         cwd=tmpdir,
-                        docs_context=docs_context if v == "with-docs" else "",
+                        docs_context=docs_context if v == "with-docs" else (
+                            self_navigate_context if v == "self-navigate" else ""
+                        ),
                         timeout=timeout,
                         extra_tools=t.get("extra_tools") or None,
                         model=model,
@@ -236,6 +254,7 @@ def run_remote(tasks, runner_name, variants, skill_dir, max_turns, repeat, run_d
     work_items = []
     for t in tasks:
         docs_context = docs_context_for_task(t)
+        self_navigate_context = self_navigate_context_for_task(t)
         for v in variants_for_task(t, variants):
             for i in range(repeat):
                 suffix = f"__{i + 1}" if repeat > 1 else ""
@@ -247,7 +266,9 @@ def run_remote(tasks, runner_name, variants, skill_dir, max_turns, repeat, run_d
                         "variant": v,
                         "max_turns": max_turns,
                         "skill_dir": skill_dir if v == "with-skill" else "",
-                        "docs_context": docs_context if v == "with-docs" else "",
+                        "docs_context": docs_context if v == "with-docs" else (
+                            self_navigate_context if v == "self-navigate" else ""
+                        ),
                         "setup": t.get("setup", ""),
                         "teardown": t.get("teardown", ""),
                         "verify": t.get("verify", ""),
@@ -515,9 +536,12 @@ def main(
         total_runs = 0
         for t in tasks:
             docs_context = docs_context_for_task(t)
+            self_navigate_context = self_navigate_context_for_task(t)
             for v in variants_for_task(t, variants):
                 total_runs += 1
-                ctx = docs_context if v == "with-docs" else ""
+                ctx = docs_context if v == "with-docs" else (
+                    self_navigate_context if v == "self-navigate" else ""
+                )
                 cmd, prompt = r.build_command(
                     t["intent"], v, max_turns, docs_context=ctx, extra_tools=t.get("extra_tools") or None, model=model
                 )

@@ -25,9 +25,9 @@ class ClaudeRunner(Runner):
         if variant == "with-skill":
             skill_name = Path(self.skill_dir).name if self.skill_dir else ""
             prompt = f"Use the /{skill_name} skill. {intent}" if skill_name else intent
-        elif variant == "with-docs":
+        elif variant in ("with-docs", "self-navigate"):
             prompt = f"{docs_context}{intent}" if docs_context else intent
-        else:  # without-skill
+        else:  # without-skill, without-docs
             prompt = intent
 
         cmd = [
