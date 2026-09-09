@@ -78,38 +78,52 @@ def save_result(runner_dir: Path, base: str, result: dict):
 
 
 def variants_for_task(task: dict, requested: list[str]) -> list[str]:
-    """Filter requested variants to those applicable for this task.
+    """Expand and filter requested variants to those applicable for this task.
 
     `with-docs` is only applicable when the task declares non-empty
     `ground_truth.context_refs` — otherwise there's nothing to feed the agent
-    and we'd just be re-running the without-skill baseline.
+    and we'd just be re-running the without-skill baseline. A task that
+    declares `ground_truth.doc_versions` (a {label: [refs]} dict) instead gets
+    one `with-docs:<label>` variant per version, in place of the single flat
+    with-docs -- comparing two doc versions is then one `cultivar run`, not a
+    manual diff between two separate runs.
     """
+    doc_versions = task.get("ground_truth", {}).get("doc_versions") or {}
     has_refs = bool(task.get("ground_truth", {}).get("context_refs"))
-    return [v for v in requested if v != "with-docs" or has_refs]
+    result = []
+    for v in requested:
+        if v != "with-docs":
+            result.append(v)
+        elif doc_versions:
+            result.extend(f"with-docs:{label}" for label in doc_versions)
+        elif has_refs:
+            result.append(v)
+    return result
 
 
-def docs_context_for_task(task: dict) -> str:
-    """Resolve the with-docs prompt prefix for a task, or empty string."""
-    refs = task.get("ground_truth", {}).get("context_refs") or []
+def resolve_docs_context(task: dict, variant: str) -> str:
+    """Resolve the prompt prefix for a with-docs-shaped variant, or empty string.
+
+    Covers three cases, each reading a different ground_truth field so they
+    can't cross-contaminate: the flat with-docs (`context_refs`), a specific
+    doc version (`doc_versions[label]`, for `with-docs:<label>` variants), and
+    self-navigate (`self_navigate_refs` -- a starting point, not the answer,
+    so it must stay separate from with-docs's full reference set).
+    """
+    gt = task.get("ground_truth", {})
+    if variant.startswith("with-docs:"):
+        label = variant.split(":", 1)[1]
+        refs = (gt.get("doc_versions") or {}).get(label) or []
+    elif variant == "with-docs":
+        refs = gt.get("context_refs") or []
+    elif variant == "self-navigate":
+        refs = gt.get("self_navigate_refs") or []
+    else:
+        return ""
     if not refs:
         return ""
     # Local import: keeps this module importable without the anthropic SDK
     # for tests that only exercise non-grader paths.
-    from evals.framework.grader import load_runner_refs
-
-    return load_runner_refs(refs)
-
-
-def self_navigate_context_for_task(task: dict) -> str:
-    """Resolve the self-navigate prompt prefix for a task, or empty string.
-
-    Distinct from context_refs/docs_context (the with-docs variant's full
-    reference set): self-navigate should get only a starting point, not the
-    answer, so it comes from its own `self_navigate_refs` field.
-    """
-    refs = task.get("ground_truth", {}).get("self_navigate_refs") or []
-    if not refs:
-        return ""
     from evals.framework.grader import load_runner_refs
 
     return load_runner_refs(refs)
@@ -138,8 +152,6 @@ def run_local(tasks, runner_cls, variants, skill_dir, max_turns, repeat, run_dir
     done = 0
 
     for t in tasks:
-        docs_context = docs_context_for_task(t)
-        self_navigate_context = self_navigate_context_for_task(t)
         for v in variants_for_task(t, variants):
             runner_dir = run_dir / r.name
             runner_dir.mkdir(parents=True, exist_ok=True)
@@ -189,9 +201,7 @@ def run_local(tasks, runner_cls, variants, skill_dir, max_turns, repeat, run_dir
                         v,
                         max_turns=max_turns,
                         cwd=tmpdir,
-                        docs_context=docs_context if v == "with-docs" else (
-                            self_navigate_context if v == "self-navigate" else ""
-                        ),
+                        docs_context=resolve_docs_context(t, v),
                         timeout=timeout,
                         extra_tools=t.get("extra_tools") or None,
                         model=model,
@@ -253,8 +263,6 @@ def run_remote(tasks, runner_name, variants, skill_dir, max_turns, repeat, run_d
     # Build work items — one per sandbox
     work_items = []
     for t in tasks:
-        docs_context = docs_context_for_task(t)
-        self_navigate_context = self_navigate_context_for_task(t)
         for v in variants_for_task(t, variants):
             for i in range(repeat):
                 suffix = f"__{i + 1}" if repeat > 1 else ""
@@ -266,9 +274,7 @@ def run_remote(tasks, runner_name, variants, skill_dir, max_turns, repeat, run_d
                         "variant": v,
                         "max_turns": max_turns,
                         "skill_dir": skill_dir if v == "with-skill" else "",
-                        "docs_context": docs_context if v == "with-docs" else (
-                            self_navigate_context if v == "self-navigate" else ""
-                        ),
+                        "docs_context": resolve_docs_context(t, v),
                         "setup": t.get("setup", ""),
                         "teardown": t.get("teardown", ""),
                         "verify": t.get("verify", ""),
@@ -522,8 +528,12 @@ def main(
     # them (e.g. Arjun's skill tests) don't pick up extra cost by default.
     docs_eval_variants = {"without-docs", "self-navigate"} if runner == "claude" else set()
     if variant:
-        if variant not in valid_variants and variant not in docs_eval_variants:
-            available = valid_variants + sorted(docs_eval_variants)
+        # A specific doc_versions label (with-docs:<label>) is also a real,
+        # explicit choice -- accepted without being in the default sweep, same
+        # as the other docs-eval variants above.
+        is_doc_version = runner == "claude" and variant.startswith("with-docs:")
+        if variant not in valid_variants and variant not in docs_eval_variants and not is_doc_version:
+            available = valid_variants + sorted(docs_eval_variants) + ["with-docs:<label>"]
             typer.echo(f"Error: Unknown variant '{variant}'. Available: {available}")
             raise typer.Exit(1)
         variants = [variant]
@@ -535,15 +545,15 @@ def main(
         r = runner_cls(skill_dir=skill_dir_str)
         total_runs = 0
         for t in tasks:
-            docs_context = docs_context_for_task(t)
-            self_navigate_context = self_navigate_context_for_task(t)
             for v in variants_for_task(t, variants):
                 total_runs += 1
-                ctx = docs_context if v == "with-docs" else (
-                    self_navigate_context if v == "self-navigate" else ""
-                )
                 cmd, prompt = r.build_command(
-                    t["intent"], v, max_turns, docs_context=ctx, extra_tools=t.get("extra_tools") or None, model=model
+                    t["intent"],
+                    v,
+                    max_turns,
+                    docs_context=resolve_docs_context(t, v),
+                    extra_tools=t.get("extra_tools") or None,
+                    model=model,
                 )
                 typer.echo(f"\n{'━' * 70}")
                 typer.echo(f"Task:    {t['id']}")

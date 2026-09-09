@@ -25,7 +25,7 @@ class ClaudeRunner(Runner):
         if variant == "with-skill":
             skill_name = Path(self.skill_dir).name if self.skill_dir else ""
             prompt = f"Use the /{skill_name} skill. {intent}" if skill_name else intent
-        elif variant in ("with-docs", "self-navigate"):
+        elif variant == "with-docs" or variant.startswith("with-docs:") or variant == "self-navigate":
             prompt = f"{docs_context}{intent}" if docs_context else intent
         else:  # without-skill, without-docs
             prompt = intent
@@ -62,7 +62,7 @@ class ClaudeRunner(Runner):
             # WebFetch scoped to this one variant, not via extra_tools, so it
             # can't leak into without-skill/without-docs below.
             tools = ["Bash", "Read", "Write", "Edit", "WebFetch"]
-        elif variant in ("without-skill", "without-docs", "with-docs"):
+        elif variant in ("without-skill", "without-docs", "with-docs") or variant.startswith("with-docs:"):
             tools = ["Bash", "Read", "Write", "Edit"]
         else:
             tools = ["Bash", "Read", "Write", "Edit", "Skill", "ToolSearch"]

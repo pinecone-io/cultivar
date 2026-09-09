@@ -1470,7 +1470,7 @@ class TestOrchestratorCallSurface:
         run_dir.mkdir()
         tasks = [{"id": "t", "intent": "do thing", "ground_truth": {"criteria": "x"}}]
 
-        with patch.object(run_module, "docs_context_for_task", return_value=""):
+        with patch.object(run_module, "resolve_docs_context", return_value=""):
             run_local(
                 tasks=tasks,
                 runner_cls=_Runner,
