@@ -37,7 +37,9 @@ That's it. No version, no metadata. The list under `tasks:` is what gets loaded.
 | `commands` | no | list of strings | Expected commands the agent should run. Surfaced to the grader as a hint. |
 | `flexible` | no | list of strings | Notes about acceptable variation (e.g. `"single or double quotes ok"`, `"file extension can be .py or .pyw"`). |
 | `outcome` | no | string | Short description of expected end state. Surfaced to the grader. |
-| `context_refs` | no | list of paths | Local files included verbatim as authoritative reference material. Used in **two places**: (1) the grader prompt as `## Reference Material`; (2) the **with-docs** runner variant as a prompt prefix the agent reads before doing the task. cwd-relative. Capped at 100 KB total; missing files warn + skip. Setting this auto-enables a third runner variant alongside with-skill / without-skill. URLs not supported yet — `curl > file.md` and ref the file. |
+| `context_refs` | no | list of paths/URLs | Included verbatim as authoritative reference material. Used in **two places**: (1) the grader prompt as `## Reference Material`; (2) the **with-docs** runner variant as a prompt prefix the agent reads before doing the task. Entries are cwd-relative local files or `http(s)://` URLs (fetched live, Mintlify raw-markdown form first then HTML fallback, cached under `./.docs_cache`). Capped at 100 KB total; missing/unfetchable refs warn + skip. Setting this auto-enables a third runner variant alongside with-skill / without-skill. |
+| `self_navigate_refs` | no | list of paths/URLs | A starting point, not the answer — used only by the **self-navigate** variant (Claude runner), which also gets WebFetch enabled so it has to find the rest itself. Kept separate from `context_refs` on purpose; mixing them would hand self-navigate the destination page it's supposed to be finding. |
+| `doc_versions` | no | `{label: [refs]}` | Alternative to `context_refs` for comparing doc versions. Each label becomes its own `with-docs:<label>` variant, resolved the same way `context_refs` is (files or URLs). `--variant with-docs` auto-expands into one real run per label instead of a single flat with-docs run. |
 
 ## Worked examples
 
@@ -120,6 +122,14 @@ Each runner advertises three variants:
 
 Use the with-docs delta against with-skill to answer "is my distilled skill better than just pointing the agent at the docs?" With `--remote`, the three variants run in parallel sandboxes (default `--parallel 5`).
 
+### Testing docs, not skills (Claude runner only)
+
+Three more real `--variant` choices, opt-in, not part of the default sweep above:
+
+- **without-docs** — identical to without-skill, named for docs-testing clarity: when the thing under test is a doc rather than a skill, "no docs at all" reads better than "without-skill."
+- **self-navigate** — no injected reference material, but WebFetch is enabled and `self_navigate_refs` gives it a starting page. Tests whether the agent can find the right doc on its own; with-docs tests whether the content is good once handed over. Different questions.
+- **`with-docs:<label>`** — generated automatically when a task sets `doc_versions` instead of `context_refs`. `--variant with-docs` expands into one run per label.
+
 ## Worked example: context_refs
 
 Pin a doc the grader should treat as authoritative for the criteria:
@@ -140,14 +150,13 @@ The grader reads `docs/n8n-best-practices.md` (cwd-relative), includes its conte
 
 `context_refs` also activates the **with-docs** runner variant for this task: the same files get prepended to the agent's prompt (with a divider before the intent) so the comparison "skill vs raw docs" runs alongside "skill vs nothing." Tasks without `context_refs` run only with-skill and without-skill.
 
-For URL content, save it locally first (`curl https://... > docs/refs/source.md`) and ref the file. URL fetching is not supported yet — save content locally first.
+`context_refs` entries can also be `http(s)://` URLs, fetched live and cached under `./.docs_cache` (no need to `curl` a local copy first anymore).
 
 ## Things that aren't fields yet
 
 These are tracked but not implemented:
 
 - Per-task sandbox timeout / image extras / extra mounts
-- URL support in `context_refs:` (currently files only)
 - Per-task model override for the grader
 
 ## Common mistakes
