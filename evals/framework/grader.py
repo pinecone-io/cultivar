@@ -3,6 +3,7 @@
 import json
 import os
 import re
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -23,9 +24,9 @@ from evals.framework.reporting import (
 def _require_anthropic_key() -> None:
     """Fail fast with a clear message if ANTHROPIC_API_KEY isn't set.
 
-    The grader calls the Anthropic API directly; without the key it throws a raw
-    SDK traceback, which is confusing for new users. Called from any entry point
-    that will reach the Anthropic client.
+    The claude backend calls the Anthropic API directly; without the key it throws
+    a raw SDK traceback, which is confusing for new users. Called from any entry
+    point that will reach the Anthropic client.
     """
     if not os.environ.get("ANTHROPIC_API_KEY"):
         console.print(
@@ -43,8 +44,51 @@ EXAMPLES_DIR = Path.cwd() / "examples"
 
 DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 
+BACKEND_CLAUDE = "claude"
+BACKEND_TYPESAFE = "typesafe"
+BACKENDS = (BACKEND_CLAUDE, BACKEND_TYPESAFE)
+
+
+def resolve_task_backend(task: dict, default: str) -> str:
+    """The backend for one task: its own `grader_backend` pin, else the run default.
+
+    A pin wins over the CLI flag because it records a property of the task --
+    e.g. a debugging-oriented task whose criteria are only useful with quoted
+    evidence -- whereas `--backend` is a run-wide default. An unknown value
+    falls back to the default rather than aborting a long run over a typo in
+    one task.
+    """
+    pinned = task.get("grader_backend")
+    if not pinned:
+        return default
+    if pinned not in BACKENDS:
+        console.print(
+            f"[yellow]Task {task.get('id', '?')!r} pins unknown grader_backend {pinned!r}; "
+            f"using {default!r}. Valid values: {', '.join(BACKENDS)}.[/yellow]"
+        )
+        return default
+    return pinned
+
+
+def _auth_error_types(backend: str) -> tuple[type[BaseException], ...]:
+    """Exceptions that should abort the whole grading batch for `backend`.
+
+    A bad key fails identically on every remaining conversation, so these are
+    re-raised rather than turned into a wall of identical FAIL grades. The set
+    is per-backend because the two SDKs raise unrelated classes.
+    """
+    if backend == BACKEND_TYPESAFE:
+        from evals.framework.typesafe_grader import auth_error_types
+
+        return auth_error_types()
+    return (AuthenticationError, PermissionDeniedError)
+
 
 GRADER_MAX_TOKENS = 4096
+
+# Conversation traces are truncated to this many characters before grading.
+# Shared with the TypeSafe backend so both judge the same slice of a long run.
+GRADER_CONV_CAP = 50000
 
 # Claude Fable 5 / Mythos 5 think on every request and reject an explicit
 # `thinking: {"type": "disabled"}` at any effort level -- the grader must not
@@ -426,7 +470,7 @@ def build_grader_prompt(
 
 # Markers that indicate the agent RUN itself failed (auth/API/quota/etc.) rather
 # than a clean run that simply wrote nothing — used to give an accurate cause when
-# a code-gen workdir is empty (see grade_one's autofail).
+# a code-gen workdir is empty (see _pregrade_autofail).
 _RUN_ERROR_MARKERS = (
     "invalid api key",
     "fix external api key",
@@ -456,18 +500,19 @@ def _detect_run_error(conversation: dict, conv_str: str) -> str:
     return ""
 
 
-def grade_one(
-    client: Anthropic,
-    model: str,
+def _pregrade_autofail(
     task: dict,
     conversation: dict,
-    examples_block: str,
-    skill_content: str = "",
-    workdir_content: str = "",
-    max_tokens: int = GRADER_MAX_TOKENS,
-) -> dict[str, Any]:
-    conv_str = conversation.get("conversation_md", "")
+    conv_str: str,
+    workdir_content: str,
+) -> dict[str, Any] | None:
+    """The grade for a trace not worth sending to any model, or None to proceed.
 
+    These checks are properties of the trace, not of the grading model, so
+    every backend shares them — a code-gen run with an empty workdir would
+    otherwise reach the model with criteria and reference material but no
+    files, which is exactly how fabricated evidence gets reported as a pass.
+    """
     # Autofail when there's no agent signal in the trace — calling the grader
     # in that case just produces hallucination from calibration examples or
     # the task criteria itself.
@@ -517,8 +562,27 @@ def grade_one(
             ],
         }
 
-    if len(conv_str) > 50000:
-        conv_str = conv_str[:50000] + "\n... (truncated)"
+    return None
+
+
+def grade_one(
+    client: Anthropic,
+    model: str,
+    task: dict,
+    conversation: dict,
+    examples_block: str,
+    skill_content: str = "",
+    workdir_content: str = "",
+    max_tokens: int = GRADER_MAX_TOKENS,
+) -> dict[str, Any]:
+    conv_str = conversation.get("conversation_md", "")
+
+    auto = _pregrade_autofail(task, conversation, conv_str, workdir_content)
+    if auto is not None:
+        return auto
+
+    if len(conv_str) > GRADER_CONV_CAP:
+        conv_str = conv_str[:GRADER_CONV_CAP] + "\n... (truncated)"
 
     verify_output = conversation.get("verify_output", "")
     refs_content = load_context_refs(task.get("ground_truth", {}).get("context_refs", []))
@@ -573,12 +637,14 @@ def grade_one(
         grade["pass"] = grade["pass"].lower() == "true"
 
     grade["suggestions"] = _normalize_suggestions(grade.get("suggestions"))
+    grade["grader_backend"] = "claude"
+    grade["grader_model"] = model
 
     return grade
 
 
 def _grade_conversation_safely(
-    client: Anthropic,
+    client: Any,
     model: str,
     task: dict,
     conversation: dict,
@@ -587,6 +653,7 @@ def _grade_conversation_safely(
     workdir_content: str,
     label: str,
     max_tokens: int = GRADER_MAX_TOKENS,
+    backend: str = BACKEND_CLAUDE,
 ) -> dict[str, Any]:
     """Call grade_one, turning any exception into a FAIL grade instead of propagating it.
 
@@ -605,9 +672,14 @@ def _grade_conversation_safely(
     problem once, immediately -- the way the CLI already did before this
     wrapper existed.
     """
+    abort_on = _auth_error_types(backend)
     try:
+        if backend == BACKEND_TYPESAFE:
+            from evals.framework.typesafe_grader import grade_one_typesafe
+
+            return grade_one_typesafe(client, model, task, conversation, skill_content, workdir_content)
         return grade_one(client, model, task, conversation, examples_block, skill_content, workdir_content, max_tokens)
-    except (AuthenticationError, PermissionDeniedError):
+    except abort_on:
         raise
     except Exception as e:
         console.print(f"[red]Grader call failed for {label}: {e}[/red]")
@@ -690,6 +762,28 @@ def main(
         help="Skill name for loading SKILL.md + calibration examples. Auto-detected from <results_dir>/tasks.json if omitted.",
     ),
     model: str = typer.Option(DEFAULT_MODEL, help=f"Anthropic model id for grading. Default: {DEFAULT_MODEL}."),
+    backend: str = typer.Option(
+        BACKEND_CLAUDE,
+        "--backend",
+        help=(
+            "Grading backend: 'claude' (default, Anthropic API) or 'typesafe' "
+            "(TypeSafe System One / Jev; needs TYPESAFE_API_KEY)."
+        ),
+    ),
+    typesafe_model: str = typer.Option(
+        "",
+        "--typesafe-model",
+        help="Model id for --backend typesafe. Default: jev-latest. Ignored by the claude backend.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help=(
+            "With --backend typesafe: print the per-section token breakdown of each grader "
+            "state and flag any that exceed the model's state budget. No API calls, no grades.json. "
+            "Exits 1 if any state is over budget, so it works as a CI preflight."
+        ),
+    ),
     max_tokens: int = typer.Option(
         GRADER_MAX_TOKENS,
         "--max-tokens",
@@ -716,12 +810,23 @@ def main(
         "with-skill", "--gate-variant", help="Variant that --fail-under measures. Default: with-skill."
     ),
 ):
-    """Grade an existing results dir with the LLM grader; writes grades.json and prints a report.
+    """Grade an existing results dir; writes grades.json and prints a report.
 
-    Reads each runner conversation, builds a grader prompt (skill ref + criteria
-    + calibration examples + conversation + verify output + workdir files),
-    calls the Anthropic API, and writes <results_dir>/grades.json. Requires
-    ANTHROPIC_API_KEY (auto-loaded from .env in cwd).
+    Reads each runner conversation and grades it with one of two backends,
+    writing <results_dir>/grades.json.
+
+    claude (default): builds a text prompt (skill ref + criteria + calibration
+    examples + conversation + verify output + workdir files) and calls the
+    Anthropic API. Needs ANTHROPIC_API_KEY.
+
+    typesafe: sends the same evidence as typed state to TypeSafe System One and
+    composes the grade from its judgments. Calibration examples are not used,
+    and the grade carries no quoted evidence or model-written reasoning. Needs
+    TYPESAFE_API_KEY and the `cultivar[typesafe]` extra.
+
+    Keys are auto-loaded from .env in cwd, and only the backends actually used
+    are required. A task can pin its own backend with `grader_backend:` in the
+    task YAML, which overrides --backend.
 
     Examples:
       cultivar grade latest                                  # regrade the most recent run
@@ -729,11 +834,16 @@ def main(
       cultivar grade latest --model claude-sonnet-4-6        # use a stronger grader
       cultivar grade latest --no-report                      # write grades.json, skip the report
       cultivar grade latest --fail-under 80                  # exit 1 if with-skill pass rate < 80%
-      cultivar grade latest --max-tokens 8192                 # give the grader more room per reply
+      cultivar grade latest --max-tokens 8192                # give the grader more room per reply
+      cultivar grade latest --backend typesafe               # grade with TypeSafe System One (Jev)
+      cultivar grade latest --backend typesafe --typesafe-model jev-1.13.0
+      cultivar grade latest --backend typesafe --dry-run     # token budget only; no calls, no grades.json
 
-    See docs/grader.md for prompt structure and calibration tips.
+    See docs/grader.md for the backend comparison, prompt structure, and calibration tips.
     """
-    _require_anthropic_key()
+    if backend not in BACKENDS:
+        console.print(f"[red]Unknown --backend '{backend}'. Choose one of: {', '.join(BACKENDS)}.[/red]")
+        raise typer.Exit(1)
 
     results_path = resolve_results_dir(results_dir)
     console.print(f"[bold]Grading:[/bold] {results_path.name}")
@@ -758,6 +868,13 @@ def main(
     if all_examples:
         n_examples = all_examples.count("###")
         console.print(f"[dim]{n_examples} calibration examples available[/dim]")
+        if backend == BACKEND_TYPESAFE:
+            console.print(
+                f"[yellow]Note: the typesafe backend ignores all {n_examples} calibration "
+                "example(s) — they anchor a text model's pass/fail threshold, whereas "
+                "System One is steered by its own probability threshold. Verdicts here are "
+                "NOT calibrated by those examples the way --backend claude's are.[/yellow]"
+            )
 
     # Load SKILL.md for grader context
     base_dir = resolve_skills_base(skills_dir)
@@ -766,16 +883,79 @@ def main(
     if skill_md.exists():
         skill_content = skill_md.read_text()
         console.print(f"[dim]Loaded skill reference: {skill_md}[/dim]")
+    else:
+        # Silent before: SKILL.md is usually the largest grader input, so losing
+        # it changes verdicts while everything still looks like it worked. The
+        # usual cause is a skills dir that isn't the default.
+        console.print(
+            f"[yellow]No SKILL.md at {skill_md} — grading without the skill reference.[/yellow]\n"
+            f"[yellow]Point at the right tree with --skills-dir or CULTIVAR_SKILLS_DIR "
+            f"if that isn't what you want.[/yellow]"
+        )
 
-    client = Anthropic()
+    _clients: dict[str, Any] = {}
+
+    def model_for(name: str) -> str:
+        """The model id a backend would use. Pure -- builds no client and needs no key."""
+        if name == BACKEND_TYPESAFE:
+            from evals.framework.typesafe_grader import DEFAULT_TYPESAFE_MODEL
+
+            return typesafe_model or DEFAULT_TYPESAFE_MODEL
+        return model
+
+    def client_for(name: str) -> tuple[Any, str]:
+        """Lazily build (client, model) per backend, so a run only authenticates
+        against the services its tasks actually use."""
+        if name == BACKEND_TYPESAFE:
+            from evals.framework.typesafe_grader import DEFAULT_TYPESAFE_MODEL, make_client
+
+            chosen = typesafe_model or DEFAULT_TYPESAFE_MODEL
+            if name not in _clients:
+                _clients[name] = None if dry_run else make_client(chosen)
+            return _clients[name], chosen
+        if name not in _clients:
+            _require_anthropic_key()
+            _clients[name] = Anthropic()
+        return _clients[name], model
+
+    needed = {resolve_task_backend(t, backend) for t in tasks_by_id.values()}
+
+    # Checked against the resolved backends rather than the flag alone, so a run
+    # whose tasks all pin `grader_backend: typesafe` can be dry-run without
+    # also passing --backend typesafe.
+    if dry_run and BACKEND_TYPESAFE not in needed:
+        console.print(
+            "[red]--dry-run inspects the TypeSafe state budget, but no task in this run "
+            "resolves to the typesafe backend.[/red]\n"
+            "[red]Pass --backend typesafe, or pin `grader_backend: typesafe` on a task.[/red]"
+        )
+        raise typer.Exit(1)
+
+    if not dry_run:
+        if BACKEND_CLAUDE in needed:
+            _require_anthropic_key()
+        if BACKEND_TYPESAFE in needed:
+            from evals.framework.typesafe_grader import _require_typesafe_key
+
+            _require_typesafe_key()
+    if needed == {backend}:
+        console.print(f"[dim]Backend: {backend}[/dim]")
+    else:
+        per_task = ", ".join(f"{t['id']}={resolve_task_backend(t, backend)}" for t in tasks_by_id.values())
+        console.print(f"[dim]Backend: {backend} (default); per-task: {per_task}[/dim]")
+
     grades = []
+    inspected = 0
+    oversized = 0
+    skipped_claude = 0
 
     # Scan for conversation JSONs: new layout is {runner}/{task}__{variant}.json,
     # but also support legacy flat layout {task}__{runner}__{variant}.json
     conversation_files = sorted(results_path.glob("**/*.json"))
     conversation_files = [f for f in conversation_files if f.name not in ("tasks.json", "grades.json")]
 
-    with console.status("[bold]Grading conversations...") as status:
+    status_ctx: Any = nullcontext() if dry_run else console.status("[bold]Grading conversations...")
+    with status_ctx as status:
         for conv_file in conversation_files:
             stem = conv_file.stem
             parts = stem.split("__")
@@ -813,9 +993,25 @@ def main(
                 continue
 
             task = tasks_by_id[task_id]
+            task_backend = resolve_task_backend(task, backend)
 
             with open(conv_file) as f:
                 conversation = json.load(f)
+
+            if dry_run:
+                if task_backend != BACKEND_TYPESAFE:
+                    skipped_claude += 1
+                    continue
+                from evals.framework.typesafe_grader import build_state_for_dry_run, print_state_budget
+
+                workdir = conv_file.parent / f"{conv_file.stem}.workdir"
+                state = build_state_for_dry_run(
+                    task, conversation, skill_content, load_workdir_files(workdir)
+                )
+                if not print_state_budget(state, f"{task_id} / {runner_name}/{variant} (run {run_num})"):
+                    oversized += 1
+                inspected += 1
+                continue
 
             grade: dict[str, Any]
             if "error" in conversation:
@@ -832,13 +1028,15 @@ def main(
                     ],
                 }
             else:
-                status.update(f"[bold]Grading {task_id} / {runner_name}/{variant}...")
+                if status:
+                    status.update(f"[bold]Grading {task_id} / {runner_name}/{variant}...")
                 examples_block = load_examples(skill, task_id=task_id)
                 workdir = conv_file.parent / f"{conv_file.stem}.workdir"
                 workdir_content = load_workdir_files(workdir)
+                task_client, task_model = client_for(task_backend)
                 grade = _grade_conversation_safely(
-                    client,
-                    model,
+                    task_client,
+                    task_model,
                     task,
                     conversation,
                     examples_block,
@@ -846,6 +1044,7 @@ def main(
                     workdir_content,
                     label=f"{task_id} / {runner_name}/{variant}",
                     max_tokens=max_tokens,
+                    backend=task_backend,
                 )
 
             # Extract run stats from the JSON output
@@ -860,6 +1059,14 @@ def main(
             )
             grade["output_tokens"] = usage.get("output_tokens") or 0
 
+            # setdefault, not assignment: a grade that reached a model already
+            # carries the authoritative pair. This backfills the paths that never
+            # called one -- trace autofails, runner errors, grader exceptions --
+            # so every row says who was responsible and an all-autofail run still
+            # reports a backend instead of printing no banner at all.
+            grade.setdefault("grader_backend", task_backend)
+            grade.setdefault("grader_model", model_for(task_backend))
+
             grade["task_id"] = task_id
             grade["runner"] = runner_name
             grade["variant"] = variant
@@ -869,6 +1076,39 @@ def main(
             if conversation.get("sandbox_timing"):
                 grade["sandbox_timing"] = conversation["sandbox_timing"]
             grades.append(grade)
+
+    if dry_run:
+        skipped_note = f"; skipped {skipped_claude} graded by claude" if skipped_claude else ""
+        console.print(
+            f"\n[bold]Dry run:[/bold] inspected {inspected} conversation(s){skipped_note}; "
+            f"{oversized} exceed the TypeSafe state budget."
+        )
+        if not inspected:
+            console.print("[yellow]Nothing to inspect — no task resolves to the typesafe backend.[/yellow]")
+            return
+        if not skill_content:
+            console.print(
+                "[yellow]Note: SKILL.md was not found, so no `skill_reference` row appears above. "
+                "It is usually the largest section — these totals understate a real grade.[/yellow]"
+            )
+        if oversized:
+            console.print(
+                "[yellow]Oversized states are truncated before grading — TypeSafe would judge "
+                "those runs on less evidence than the claude backend sees. Shrink the inputs "
+                "(smaller context_refs, a tighter SKILL.md) or grade them with --backend claude."
+                "[/yellow]"
+            )
+        elif skill_content:
+            console.print("[green]Every state fits; TypeSafe would see the full evidence.[/green]")
+        else:
+            console.print("[green]Every state fits.[/green]")
+        console.print("[dim]No API calls made, no grades.json written.[/dim]")
+        # Nonzero on truncation so this is usable as a CI preflight: "would
+        # TypeSafe see everything the claude backend does?" is a pass/fail
+        # question, and a green exit on a truncated state would answer it wrong.
+        if oversized:
+            raise typer.Exit(1)
+        return
 
     out_path = results_path / "grades.json"
     with open(out_path, "w") as f:

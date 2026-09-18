@@ -69,6 +69,8 @@ For workspace sharing, custom images, and debugging sandbox failures, see [docs/
 mkdir ~/my-evals && cd ~/my-evals
 cat > .env <<'EOF'
 ANTHROPIC_API_KEY=sk-ant-...
+# Optional — only for `--backend typesafe` grading (see docs/grader.md)
+# TYPESAFE_API_KEY=...
 EOF
 ```
 
@@ -198,6 +200,14 @@ cultivar report
 # Regrade after editing criteria or adding calibration examples
 cultivar grade --report
 
+# Grade with TypeSafe System One instead of Claude — ~30x cheaper, no written
+# reasoning or quoted evidence. Good for CI gates; see docs/grader.md.
+# Needs the optional extra: pip install 'cultivar[typesafe]'
+cultivar grade latest --backend typesafe
+
+# Preview what TypeSafe would be sent, per section, without spending anything
+cultivar grade latest --backend typesafe --dry-run
+
 # Drop down to raw artifacts when needed
 jq . results/<run>/claude/my-task__with-skill.jsonl | less
 ls results/<run>/claude/my-task__with-skill.workdir/
@@ -224,7 +234,7 @@ Easiest path (assumes you have a Modal workspace set up):
    ```
 3. Billing accrues to your Modal account regardless of who runs what — set an expected budget if needed.
 
-The only key your coworkers personally need is `ANTHROPIC_API_KEY` (the grader runs locally). For local (non-remote) agent runs they also need whatever the relevant agent CLI requires (Claude OAuths via `claude` on first run; Copilot needs `COPILOT_GITHUB_TOKEN` with the "Copilot Requests" fine-grained PAT scope; Gemini needs `GEMINI_API_KEY`).
+The only key your coworkers personally need is `ANTHROPIC_API_KEY` (the grader runs locally) — or `TYPESAFE_API_KEY` instead, if your tasks grade with `--backend typesafe`. For local (non-remote) agent runs they also need whatever the relevant agent CLI requires (Claude OAuths via `claude` on first run; Copilot needs `COPILOT_GITHUB_TOKEN` with the "Copilot Requests" fine-grained PAT scope; Gemini needs `GEMINI_API_KEY`).
 
 
 
@@ -257,7 +267,7 @@ With `--remote`, each `(task, variant, repeat)` runs in its own Modal sandbox in
 
 - [docs/concepts.md](docs/concepts.md) — **start here** if you're new: what cultivar measures, why, and how to read the results
 - [docs/task-yaml.md](docs/task-yaml.md) — task YAML schema, every field, worked examples
-- [docs/grader.md](docs/grader.md) — how grading works, calibration examples, the prompt anatomy
+- [docs/grader.md](docs/grader.md) — how grading works, the Claude and TypeSafe backends and when to use each, calibration examples, the prompt anatomy
 - [docs/sandbox.md](docs/sandbox.md) — Modal sandbox setup (DIY), lifecycle, what's controllable
 - [docs/runners/claude.md](docs/runners/claude.md), [gemini.md](docs/runners/gemini.md), [copilot.md](docs/runners/copilot.md) — per-runner specifics
 

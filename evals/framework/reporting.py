@@ -120,10 +120,33 @@ def resolve_results_dir(results_dir: str | None) -> Path:
     return dirs[-1]
 
 
+def _print_backend_banner(grades: list[dict]) -> None:
+    """Say which grader produced these verdicts, and what that costs the reader.
+
+    Without this a TypeSafe report looks like a Claude report whose grader
+    suddenly stopped explaining itself. Named explicitly so nobody reads the
+    placeholder evidence line as a bug.
+    """
+    backends = {g.get("grader_backend", "") for g in grades if g.get("grader_backend")}
+    if not backends:
+        return
+    models = sorted({g.get("grader_model", "") for g in grades if g.get("grader_model")})
+    label = ", ".join(sorted(backends))
+    console.print(f"[dim]Graded by: {label} ({', '.join(models)})[/dim]")
+    if "typesafe" in backends:
+        console.print(
+            "[yellow]TypeSafe grades are typed judgments — no quoted evidence and no "
+            "model-written reasoning. Verdicts and probabilities only.[/yellow]"
+        )
+    console.print()
+
+
 def print_report(grades: list[dict], notes: str | None = None):
     if notes:
         console.print(Panel(notes.strip(), title="Notes", border_style="dim"))
         console.print()
+
+    _print_backend_banner(grades)
 
     by_category = defaultdict(lambda: defaultdict(list))
     for g in grades:

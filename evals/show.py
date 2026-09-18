@@ -256,10 +256,18 @@ def _stats_line(result: dict) -> str:
 
 def _print_grader(grade: dict) -> None:
     verdict = "[bold green]PASS[/bold green]" if grade.get("pass") else "[bold red]FAIL[/bold red]"
-    console.print(f"## Grader  ·  {verdict}")
+    backend = grade.get("grader_backend", "")
+    model = grade.get("grader_model", "")
+    attribution = f"  ·  [dim]{backend} {model}[/dim]" if backend else ""
+    console.print(f"## Grader  ·  {verdict}{attribution}")
+    if backend == "typesafe":
+        console.print(
+            "[dim]TypeSafe returns typed judgments, not text — there is no quoted evidence "
+            "or model-written reasoning below. Re-grade with --backend claude for those.[/dim]"
+        )
     if grade.get("proposed_command"):
         console.print(f"[bold]Command:[/bold]   {grade['proposed_command']}")
-    if grade.get("evidence"):
+    if grade.get("evidence") and backend != "typesafe":
         ev = grade["evidence"]
         if len(ev) > 600:
             ev = ev[:600] + "…"

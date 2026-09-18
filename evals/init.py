@@ -20,6 +20,7 @@ tasks:
     # teardown: "optional shell command run after (cleanup)"
     # verify: "optional shell command run after; output is passed to the grader"
     # env: ["SOME_REQUIRED_ENV_VAR"]
+    # grader_backend: claude          # claude (default) | typesafe — pins this task's grader
     ground_truth:
       criteria: |
         Describe what correct looks like in plain English.
