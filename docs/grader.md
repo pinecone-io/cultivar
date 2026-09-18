@@ -1,18 +1,117 @@
 # Grader
 
-LLM-based grader that scores runner conversations against natural-language criteria. Runs locally (never in the sandbox) so the Anthropic key stays on your machine.
+Grades runner conversations against natural-language criteria. Two backends: **Claude** (the default) and **TypeSafe System One**. Both run locally, never in the sandbox, so API keys stay on your machine.
 
 ## When it runs
 
 - `cultivar run … --grade` — runs grader after the runs finish
+- `cultivar run … --grade --grade-backend typesafe` — same, graded by System One
 - `cultivar grade <results-dir> --report` — re-grades an existing run (e.g. after editing criteria or adding examples)
 - `cultivar grade latest` — most-recent run
 
+## Backends
+
+Two graders. **Claude is the default and nothing changes unless you opt in.**
+
+| | `claude` (default) | `typesafe` |
+|---|---|---|
+| What it is | Anthropic Messages API, returns a JSON object | TypeSafe System One (Jev), returns typed judgments |
+| Verdict from | The model writing `"pass": true` | `P(completed) >= 0.5` (a calibrated probability) |
+| `evidence` | A quote from the run | **None** — says so in plain text |
+| `reasoning` | 1–2 sentences the model wrote | Mechanical: the probability and threshold |
+| `suggestions` | Model-written `cause`/`fix` | Mapped in code from a `failure_kind` label |
+| Env | `ANTHROPIC_API_KEY` | `TYPESAFE_API_KEY` |
+
+```bash
+cultivar grade latest                      # claude (default)
+cultivar grade latest --backend typesafe   # System One
+```
+
+The TypeSafe SDK is an optional extra, not part of the base install — the default backend never needs it:
+
+```bash
+uv add 'cultivar[typesafe]'      # or: pip install 'cultivar[typesafe]'
+```
+
+Without it, `--backend typesafe` exits 1 with an install hint instead of a traceback; everything else is unaffected.
+
+### When to use which
+
+**Use `claude` (the default) when:**
+- You're iterating on a skill and need to know *why* a run failed. This is the common case.
+- Your `criteria` were tuned against Claude's reading of them.
+- You rely on calibration examples (see below — `typesafe` ignores them).
+- A task has large `context_refs`; Claude's context window fits what Jev's state budget won't.
+
+**Use `typesafe` when:**
+- It's a CI gate that only reads pass/fail. You never look at `evidence` there.
+- You're re-grading a large back-catalogue and cost or wall-clock matters.
+- You want a calibrated probability rather than a verdict — `typesafe_p_completed` tells you *how* marginal a run was, which a binary pass/fail hides.
+
+Measured on one task (`hybrid-trap`, 6 conversations, both backends given identical evidence):
+
+| | claude (`haiku-4-5`) | typesafe (`jev-latest`) |
+|---|---|---|
+| Per grade | 6.87s | 0.40s |
+| Per 1000 grades | $18.66 | $0.63 |
+| Agreement | — | 6/6 with claude |
+
+Passes came back at 0.90–0.94 and failures at 0.12–0.20, so the verdicts weren't threshold-sensitive. **That's one task** — validate on your own before trusting it as a gate.
+
+### Per-task pinning
+
+A task can pin its backend in the task YAML:
+
+```yaml
+tasks:
+  - id: debug-heavy-task
+    grader_backend: claude     # claude | typesafe; omit to use the run default
+```
+
+**A pin beats `--backend`**, because it records a property of the task (this one's criteria are only useful with quoted evidence) rather than a preference for one run. `--backend` sets the default for tasks that don't pin, so a mixed run is fine and the header prints the breakdown:
+
+```
+Backend: typesafe (default); per-task: hybrid-trap=claude
+```
+
+An unknown value warns and falls back to the default rather than aborting a long run over one typo.
+
+### Both backends must see the same evidence
+
+Every section of the Claude prompt maps to a TypeSafe state field, tracked in `SECTION_PARITY` in [typesafe_grader.py](../evals/framework/typesafe_grader.py) and asserted by tests. If you add a section to one backend, add it to the other — otherwise the two graders judge from different inputs and any comparison between them is meaningless. This is not hypothetical: `SKILL.md` was briefly sent to Claude and not to Jev, which silently invalidated a benchmark.
+
+**One intentional exception: calibration examples are not sent to `typesafe`.** They exist to anchor a text model's pass/fail threshold; System One is calibrated already and is steered by `PASS_THRESHOLD` instead. The grader warns when examples exist and you've selected `typesafe`, because those verdicts are *not* calibrated by them the way Claude's are.
+
+### State budget
+
+Jev budgets **32,000 tokens** for state plus the longest question, where Claude has a far larger window. The grader's own caps (50k chars of conversation + 40k workdir + 100k `context_refs` + `SKILL.md`) can exceed that, so the TypeSafe path trims — shedding `skill_reference`, then `reference_material`, then `generated_code_files`, then `agent_conversation` last. `task_criteria` is never trimmed; losing it changes the question being asked.
+
+Check before you spend anything:
+
+```bash
+cultivar grade latest --backend typesafe --dry-run
+```
+
+```
+hybrid-trap / claude/with-skill (run 1)
+  skill_reference            41,164 chars  ~11,761 tok   72.6%
+  agent_conversation          7,022 chars  ~ 2,006 tok   12.4%
+  generated_code_files        6,968 chars  ~ 1,990 tok   12.3%
+  task_criteria               1,575 chars  ~   450 tok    2.8%
+  TOTAL                      56,729 chars  ~16,208 tok  (cap ~26,142 tok) fits
+```
+
+No API calls, no `grades.json`. Token counts are estimates (3.5 chars/token, deliberately conservative); a state flagged as over budget gets truncated at grade time and is judged on less evidence than Claude would see.
+
+**Exit code 1 if anything is over budget**, 0 otherwise, so this works as a CI preflight before a `--backend typesafe` gate.
+
 ## Required env
 
-`ANTHROPIC_API_KEY`. Drop it in `.env` in your cwd. It's auto-loaded.
+`ANTHROPIC_API_KEY` for the default backend. `TYPESAFE_API_KEY` only if you use `--backend typesafe`. Drop either in `.env` in your cwd; they're auto-loaded. A run only requires the keys its tasks actually need, and a missing key fails immediately with a clear message rather than falling back to the other backend — a Claude verdict written into a run you asked TypeSafe to grade would make `grades.json` lie.
 
 ## Model
+
+Applies to the `claude` backend. For `typesafe`, use `--typesafe-model` (default `jev-latest`).
 
 Default: `claude-haiku-4-5-20251001`. Override with `--model claude-…`. Any current Claude model works, including the "-5" generation (`claude-opus-5`, `claude-sonnet-5`, `claude-haiku-5`, optionally pinned to a dated snapshot like `claude-opus-5-20260315`) and Fable/Mythos 5, which always think and can't turn it off. The grader classifies the model from its id alone and adjusts the request so the reply is still plain JSON text:
 
@@ -95,19 +194,37 @@ reasoning: |
   "task_id": "...", "runner": "...", "variant": "...", "run_num": 1,
   "pass": true, "proposed_command": "...", "evidence": "...", "reasoning": "...",
   "suggestions": [{"cause": "...", "fix": "..."}],
+  "grader_backend": "claude", "grader_model": "claude-haiku-4-5-20251001",
   "duration_s": 12.3, "cost_usd": 0.0123,
   "num_turns": 4, "input_tokens": 1234, "output_tokens": 567,
   "session_id": "...", "category": "..."
 }
 ```
 
+`grader_backend` and `grader_model` record who produced the verdict — always check them before comparing two runs. `cultivar report` and `cultivar show … --grader` print the backend, and warn on a `typesafe` grade that there's no quoted evidence or model-written reasoning, so an empty `evidence` field doesn't read as a bug.
+
+TypeSafe grades carry three extra keys:
+
+```json
+{
+  "typesafe_p_completed": 0.94,
+  "typesafe_failure_kind": "wrong_approach",
+  "typesafe_failure_confidence": 0.62
+}
+```
+
+`typesafe_p_completed` is the calibrated probability behind the verdict — worth reading directly, since a 0.49 FAIL and a 0.02 FAIL are very different runs. A low `typesafe_failure_confidence` on a confident pass/fail means the *category* was ambiguous, not the verdict; treat it as a hint that the failure taxonomy needs work, not that the grade is wrong.
+
+`duration_s`, `cost_usd`, `num_turns` and the token counts describe the **agent run**, not the grading call, and are identical under both backends.
+
 `suggestions` is empty `[]` on clean passes. On failures it carries 1–3 `{cause, fix}` entries the grader thinks are probable root causes + concrete next steps; `cultivar report` and `cultivar show … --grader` render them as a yellow `cause → fix` bullet list. Plus `sandbox_timing` (create/setup/eval/teardown phase splits) when run remotely.
 
 ## Re-grading
 
-`cultivar grade latest --report` re-grades without re-running the agents. Use this loop when iterating on `criteria` or adding calibration examples. It's cheap (one Haiku call per task) and fast.
+`cultivar grade latest --report` re-grades without re-running the agents. Use this loop when iterating on `criteria` or adding calibration examples. It's cheap (one Haiku call per task on the default backend) and fast — and ~30x cheaper again with `--backend typesafe` when you only need the verdict.
 
 ## Sources
 
 - [evals/framework/grader.py](../evals/framework/grader.py) — prompt assembly, workdir loader, calibration loader, grading loop
-- [evals/framework/reporting.py](../evals/framework/reporting.py) — report rendering and `resolve_results_dir`
+- [evals/framework/typesafe_grader.py](../evals/framework/typesafe_grader.py) — System One backend, state assembly, `SECTION_PARITY`, budget trimming
+- [evals/framework/reporting.py](../evals/framework/reporting.py) — report rendering, backend banner, and `resolve_results_dir`

@@ -26,6 +26,11 @@ dependencies = [
     "python-dotenv",
 ]
 
+[project.optional-dependencies]
+# Opt-in grading backend. The grader defaults to Claude and degrades with a
+# clear install message when this is absent, so it stays out of the base install.
+typesafe = ["typesafe-sdk>=0.7.0"]
+
 [project.scripts]
 cultivar = "evals.cli:app"
 
@@ -34,7 +39,7 @@ Repository = "https://github.com/pinecone-io/cultivar"
 Documentation = "https://github.com/pinecone-io/cultivar/blob/main/README.md"
 
 [dependency-groups]
-test = ["pytest"]
+test = ["pytest", "typesafe-sdk>=0.7.0"]
 lint = ["ruff>=0.6", "pre-commit>=3", "ty"]
 
 [build-system]

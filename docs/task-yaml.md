@@ -27,6 +27,7 @@ That's it. No version, no metadata. The list under `tasks:` is what gets loaded.
 | `verify` | no | string (shell) | Runs after the agent. Stdout is captured into `result.verify_output` and **fed to the grader** under "Verification Output". Use this to check post-run state (e.g. `pc index stats my-test-index`). |
 | `env` | no | list of strings | Required env vars. Preflight checks each name is set; missing keys abort before any runs. |
 | `extra_tools` | no | list of strings | Tool names unioned into the variant's tool allow-list, e.g. `[WebSearch, WebFetch]` so a without-skill baseline can search/fetch the web. Per-task opt-in, not a global default. Claude-only for now; other runners accept and ignore it (see their docstrings). |
+| `grader_backend` | no | string | Pin this task's grading backend: `claude` or `typesafe`. Omit to use the run default (`--backend`, itself defaulting to `claude`). A pin **beats** the CLI flag, so a run can mix both. Unknown values warn and fall back. See [grader.md](grader.md#backends). |
 | `ground_truth` | no | object | Grader rubric — see below. Without it, grading is unreliable. |
 
 ### `ground_truth` sub-fields
@@ -157,7 +158,7 @@ The grader reads `docs/n8n-best-practices.md` (cwd-relative), includes its conte
 These are tracked but not implemented:
 
 - Per-task sandbox timeout / image extras / extra mounts
-- Per-task model override for the grader
+- Per-task *model* override for the grader (the per-task **backend** override does exist — see `grader_backend` above)
 
 ## Common mistakes
 

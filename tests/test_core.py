@@ -1684,3 +1684,437 @@ class TestReportFormats:
         from evals.framework.report import _render_md
 
         assert "No failures." in _render_md(_grades(("with-skill", True)), "run-y")
+
+
+# ---------------------------------------------------------------------------
+# 10. TypeSafe grading backend — opt-in alternative to the Claude grader
+# ---------------------------------------------------------------------------
+
+
+class _FakeNoul:
+    def __init__(self, noul):
+        self.noul = noul
+
+
+class _FakeChoice:
+    def __init__(self, choice, confidence=0.9):
+        self.choice = choice
+        self.confidence = confidence
+
+
+class _FakeResponse:
+    def __init__(self, p_completed, failure_kind="no_failure"):
+        self.nouls = {"completed": _FakeNoul(p_completed)}
+        self.choices = {"failure_kind": _FakeChoice(failure_kind)}
+
+
+class _FakeTypeSafeClient:
+    def __init__(self, response):
+        self._response = response
+        self.last_state = None
+
+    def system_one(self, state, questions, model=None):
+        self.last_state = state
+        return self._response
+
+
+class TestTypeSafeGrader:
+    """The TypeSafe backend must return the same grade shape the Claude path does."""
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        try:
+            from evals.framework import typesafe_grader
+
+            self.ts = typesafe_grader
+        except ImportError:
+            pytest.skip("typesafe-sdk not installed")
+
+    def _grade(self, p, failure_kind="no_failure", task=None):
+        client = _FakeTypeSafeClient(_FakeResponse(p, failure_kind))
+        task = task or {"ground_truth": {"criteria": "write hello.py"}}
+        conv = {"conversation_md": "**Write:** hello.py\n**Assistant:** done"}
+        return self.ts.grade_one_typesafe(client, "jev-latest", task, conv, "", "x")
+
+    def test_high_probability_passes(self):
+        assert self._grade(0.97)["pass"] is True
+
+    def test_low_probability_fails(self):
+        assert self._grade(0.02)["pass"] is False
+
+    def test_threshold_is_inclusive(self):
+        """A noul exactly at the threshold counts as a pass, not a fail."""
+        assert self._grade(self.ts.PASS_THRESHOLD)["pass"] is True
+
+    def test_grade_has_the_claude_paths_fields(self):
+        g = self._grade(0.9)
+        for field in ("pass", "proposed_command", "evidence", "reasoning", "suggestions"):
+            assert field in g
+
+    def test_records_which_backend_judged(self):
+        g = self._grade(0.9)
+        assert g["grader_backend"] == "typesafe"
+        assert g["grader_model"] == "jev-latest"
+
+    def test_failure_kind_becomes_a_suggestion(self):
+        g = self._grade(0.1, failure_kind="incomplete")
+        assert g["suggestions"], "a failing grade must carry a remediation suggestion"
+        assert g["suggestions"][0]["cause"]
+        assert g["suggestions"][0]["fix"]
+
+    def test_pass_carries_no_suggestions(self):
+        assert self._grade(0.95)["suggestions"] == []
+
+    def test_unrecognized_failure_kind_still_suggests_something(self):
+        g = self._grade(0.1, failure_kind="something_new")
+        assert len(g["suggestions"]) == 1
+        assert g["suggestions"][0]["fix"]
+
+    def test_autofail_shortcircuits_before_the_api(self):
+        """A trace with no agent signal must never reach the model."""
+        client = _FakeTypeSafeClient(_FakeResponse(0.99))
+        task = {"ground_truth": {"criteria": "c"}}
+        g = self.ts.grade_one_typesafe(client, "jev-latest", task, {"conversation_md": ""}, "", "")
+        assert g["pass"] is False
+        assert client.last_state is None, "autofailed trace was still sent to the model"
+
+    def test_state_uses_named_fields(self):
+        client = _FakeTypeSafeClient(_FakeResponse(0.9))
+        task = {"ground_truth": {"criteria": "write hello.py", "commands": ["python hello.py"]}}
+        conv = {"conversation_md": "**Write:** hello.py"}
+        self.ts.grade_one_typesafe(client, "jev-latest", task, conv, "", "files")
+        assert client.last_state["task_criteria"] == "write hello.py"
+        assert client.last_state["expected_commands"] == ["python hello.py"]
+        assert client.last_state["generated_code_files"] == "files"
+
+
+class TestTypeSafeStateBudget:
+    """State must fit Jev's budget without dropping the criteria being judged."""
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        try:
+            from evals.framework import typesafe_grader
+
+            self.ts = typesafe_grader
+        except ImportError:
+            pytest.skip("typesafe-sdk not installed")
+
+    def test_small_state_is_untouched(self):
+        s = {"task_criteria": "c" * 10, "agent_conversation": "a" * 100}
+        assert self.ts._fit_state_to_budget(s) == s
+
+    def test_oversized_state_is_trimmed_to_cap(self):
+        s = {
+            "task_criteria": "c" * 500,
+            "agent_conversation": "a" * 50_000,
+            "generated_code_files": "g" * 40_000,
+            "reference_material": "r" * 100_000,
+        }
+        out = self.ts._fit_state_to_budget(s)
+        assert sum(len(v) for v in out.values()) <= self.ts.TYPESAFE_STATE_CAP_CHARS
+
+    def test_criteria_survives_trimming(self):
+        """Trimming the criteria would change the question being asked."""
+        s = {"task_criteria": "c" * 500, "reference_material": "r" * 200_000}
+        assert self.ts._fit_state_to_budget(s)["task_criteria"] == "c" * 500
+
+    def test_reference_material_is_trimmed_before_the_trace(self):
+        s = {
+            "task_criteria": "c" * 100,
+            "agent_conversation": "a" * 50_000,
+            "reference_material": "r" * 100_000,
+        }
+        out = self.ts._fit_state_to_budget(s)
+        assert len(out["agent_conversation"]) == 50_000
+        assert len(out["reference_material"]) < 100_000
+
+
+class TestGraderSectionParity:
+    """Both backends must see the same evidence, or comparisons between them lie."""
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        try:
+            from evals.framework import typesafe_grader
+            from evals.framework.grader import build_grader_prompt
+
+            self.ts = typesafe_grader
+            self.build = build_grader_prompt
+        except ImportError:
+            pytest.skip("typesafe-sdk not installed")
+
+    def _full_task(self):
+        return {
+            "ground_truth": {
+                "criteria": "CRITERIA_MARKER",
+                "commands": ["CMD_MARKER"],
+                "flexible": ["FLEX_MARKER"],
+                "outcome": "OUTCOME_MARKER",
+            }
+        }
+
+    def _full_state(self):
+        """Every field a real grade can carry, so parity is checked at full breadth."""
+        return self.ts.build_state(
+            self._full_task(),
+            "CONV_MARKER",
+            verify_output="VERIFY_MARKER",
+            workdir_content="WORKDIR_MARKER",
+            refs_content="REFS_MARKER",
+            skill_content="SKILL_MARKER",
+            verify_exit_code=1,
+            verify_stderr="STDERR_MARKER",
+        )
+
+    def test_every_claude_section_is_accounted_for(self):
+        """A section in the Claude prompt is either mapped to a state field or explicitly waived."""
+        prompt = self.build(
+            self._full_task(),
+            "CONV_MARKER",
+            "## Calibration Examples\n### PASS",
+            "SKILL_MARKER",
+            "VERIFY_MARKER",
+            "WORKDIR_MARKER",
+            "REFS_MARKER",
+            verify_exit_code=1,
+            verify_stderr="STDERR_MARKER",
+        )
+        for section in self.ts.SECTION_PARITY:
+            assert section in prompt, f"{section!r} is in SECTION_PARITY but not in the Claude prompt"
+
+    def test_mapped_sections_reach_the_typesafe_state(self):
+        state = self._full_state()
+        for section, field in self.ts.SECTION_PARITY.items():
+            if field is None:
+                continue
+            assert field in state, f"{section!r} maps to {field!r}, which the state never sets"
+
+    def test_skill_md_reaches_both_backends(self):
+        """The asymmetry that silently invalidated an earlier backend comparison."""
+        assert self._full_state()["skill_reference"] == "SKILL_MARKER"
+
+    def test_calibration_examples_are_the_only_waived_section(self):
+        waived = [s for s, f in self.ts.SECTION_PARITY.items() if f is None]
+        assert waived == ["Calibration Examples"], (
+            "A new section is being withheld from the typesafe backend. That skews any "
+            "comparison between backends — map it to a state field or document why not."
+        )
+
+    def test_evidence_bearing_content_is_never_silently_dropped(self):
+        state = self._full_state()
+        for marker in ("CONV_MARKER", "WORKDIR_MARKER", "VERIFY_MARKER", "CRITERIA_MARKER"):
+            assert any(marker in v for v in state.values() if isinstance(v, str)), marker
+
+
+class TestResolveTaskBackend:
+    """A task may pin its grading backend; the CLI flag is only the default."""
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        from evals.framework.grader import resolve_task_backend
+
+        self.resolve = resolve_task_backend
+
+    def test_unpinned_task_uses_the_run_default(self):
+        assert self.resolve({"id": "t"}, "claude") == "claude"
+        assert self.resolve({"id": "t"}, "typesafe") == "typesafe"
+
+    def test_pin_overrides_the_run_default(self):
+        """The pin records a property of the task, so it beats a run-wide flag."""
+        assert self.resolve({"id": "t", "grader_backend": "claude"}, "typesafe") == "claude"
+        assert self.resolve({"id": "t", "grader_backend": "typesafe"}, "claude") == "typesafe"
+
+    def test_unknown_pin_falls_back_instead_of_aborting(self):
+        """A typo in one task must not kill a long grading run."""
+        assert self.resolve({"id": "t", "grader_backend": "gpt"}, "claude") == "claude"
+
+    def test_empty_pin_is_treated_as_unset(self):
+        assert self.resolve({"id": "t", "grader_backend": ""}, "claude") == "claude"
+
+
+class TestBackendAttributionInOutputs:
+    """Every surface that shows a verdict must say which grader produced it."""
+
+    def _grades(self, backend, model):
+        return [
+            {
+                "task_id": "t", "runner": "claude", "variant": "with-skill", "run_num": 1,
+                "pass": False, "evidence": "", "reasoning": "r", "suggestions": [],
+                "category": "cli", "duration_s": 1.0, "cost_usd": 0.0,
+                "grader_backend": backend, "grader_model": model,
+            }
+        ]
+
+    def test_markdown_report_names_the_backend(self):
+        """A markdown report is read in PRs with none of the console context."""
+        from evals.framework.report import _render_md
+
+        md = _render_md(self._grades("typesafe", "jev-latest"), "run-x")
+        assert "typesafe" in md
+        assert "jev-latest" in md
+
+    def test_markdown_warns_that_typesafe_has_no_reasoning(self):
+        from evals.framework.report import _render_md
+
+        md = _render_md(self._grades("typesafe", "jev-latest"), "run-x")
+        assert "typed judgments" in md
+
+    def test_markdown_does_not_warn_for_claude(self):
+        from evals.framework.report import _render_md
+
+        md = _render_md(self._grades("claude", "claude-haiku-4-5-20251001"), "run-x")
+        assert "typed judgments" not in md
+        assert "claude" in md
+
+    def test_legacy_grades_without_backend_still_render(self):
+        """grades.json written before this field existed must not crash the report."""
+        from evals.framework.report import _render_md
+
+        g = self._grades("claude", "m")[0]
+        del g["grader_backend"], g["grader_model"]
+        md = _render_md([g], "run-x")
+        assert "run-x" in md
+        assert "Graded by" not in md
+
+
+class TestTypeSafeBudgetInvariant:
+    """The char cap must be provably under the model's token budget."""
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        try:
+            from evals.framework import typesafe_grader
+
+            self.ts = typesafe_grader
+        except ImportError:
+            pytest.skip("typesafe-sdk not installed")
+
+    def test_cap_fits_budget_even_at_dense_tokenization(self):
+        """A hardcoded cap once claimed to be conservative while exceeding the budget."""
+        worst_case = self.ts.TYPESAFE_STATE_CAP_CHARS / self.ts._DENSE_CHARS_PER_TOKEN
+        assert worst_case + self.ts._QUESTION_HEADROOM_TOKENS <= self.ts.TYPESAFE_STATE_MAX_TOKENS
+
+    def test_cap_is_derived_not_hardcoded(self):
+        expected = int(
+            (self.ts.TYPESAFE_STATE_MAX_TOKENS - self.ts._QUESTION_HEADROOM_TOKENS)
+            * self.ts._DENSE_CHARS_PER_TOKEN
+        )
+        assert self.ts.TYPESAFE_STATE_CAP_CHARS == expected
+
+    def test_reporting_density_is_looser_than_the_cap_density(self):
+        assert self.ts._CHARS_PER_TOKEN > self.ts._DENSE_CHARS_PER_TOKEN
+
+
+class TestSummaryNamesTheGrader:
+    """`--format json` is a CI trend record; it must say which grader produced it."""
+
+    def _grades(self, **extra):
+        base = {
+            "task_id": "t", "runner": "claude", "variant": "with-skill", "run_num": 1,
+            "pass": False, "evidence": "e", "category": "cli",
+            "grader_backend": "typesafe", "grader_model": "jev-latest",
+        }
+        base.update(extra)
+        return [base]
+
+    def test_summary_lists_backends_and_models(self):
+        from evals.framework.report import _summarize
+
+        s = _summarize(self._grades())
+        assert s["graders"] == ["typesafe"]
+        assert s["grader_models"] == ["jev-latest"]
+
+    def test_failures_carry_the_probability_when_present(self):
+        """Typesafe evidence is identical boilerplate; the probability is the real signal."""
+        from evals.framework.report import _summarize
+
+        s = _summarize(self._grades(typesafe_p_completed=0.31))
+        assert s["failures"][0]["p_completed"] == 0.31
+
+    def test_claude_failures_omit_the_probability_key(self):
+        from evals.framework.report import _summarize
+
+        s = _summarize(self._grades(grader_backend="claude", grader_model="m"))
+        assert "p_completed" not in s["failures"][0]
+
+    def test_legacy_grades_produce_empty_grader_lists(self):
+        from evals.framework.report import _summarize
+
+        g = self._grades()[0]
+        del g["grader_backend"], g["grader_model"]
+        s = _summarize([g])
+        assert s["graders"] == [] and s["grader_models"] == []
+
+
+class TestSectionParityCatchesNewSections:
+    """The reverse direction: a section added to the Claude prompt must be declared.
+
+    The forward check (every SECTION_PARITY key appears in the prompt) cannot
+    catch a section added to the prompt and nowhere else — which is exactly how
+    the execution-verification fields reached Claude and not TypeSafe.
+    """
+
+    # Prompt headings that are instructions to the grader rather than evidence
+    # about the run, so they have no state-field counterpart.
+    NON_EVIDENCE = {"Instructions"}
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        try:
+            from evals.framework import typesafe_grader
+            from evals.framework.grader import build_grader_prompt
+
+            self.ts = typesafe_grader
+            self.build = build_grader_prompt
+        except ImportError:
+            pytest.skip("typesafe-sdk not installed")
+
+    def _headings(self) -> list[str]:
+        prompt = self.build(
+            {
+                "ground_truth": {
+                    "criteria": "C", "commands": ["cmd"], "flexible": ["f"], "outcome": "o",
+                }
+            },
+            "CONV",
+            "## Calibration Examples\n### PASS",
+            "SKILL",
+            "VERIFY",
+            "WORKDIR",
+            "REFS",
+            verify_exit_code=1,
+            verify_stderr="ERR",
+        )
+        return [ln[3:].strip() for ln in prompt.splitlines() if ln.startswith("## ")]
+
+    def test_every_prompt_heading_is_declared_in_section_parity(self):
+        declared = set(self.ts.SECTION_PARITY)
+        for heading in self._headings():
+            if heading in self.NON_EVIDENCE:
+                continue
+            # Headings may carry a qualifier, e.g. "Verification Output (EXECUTION — AUTHORITATIVE)".
+            base = next((d for d in declared if heading.startswith(d)), None)
+            assert base is not None, (
+                f"Prompt section {heading!r} is not in SECTION_PARITY. Add it and map it to a "
+                "TypeSafe state field, or the two backends will grade from different evidence."
+            )
+
+    def test_execution_verification_reaches_typesafe(self):
+        """Regression: these arrived on the Claude side only."""
+        state = self.ts.build_state(
+            {"ground_truth": {"criteria": "C"}},
+            "CONV",
+            verify_output="OUT",
+            verify_exit_code=1,
+            verify_stderr="ERR",
+        )
+        assert state["verification_stderr"] == "ERR"
+        assert state["verification_exit_code"] == 1
+        assert "FAILED" in state["verification_result"]
+
+    def test_passing_execution_is_labelled_too(self):
+        state = self.ts.build_state(
+            {"ground_truth": {"criteria": "C"}}, "CONV", verify_exit_code=0
+        )
+        assert "PASSED" in state["verification_result"]

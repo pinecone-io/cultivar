@@ -23,7 +23,7 @@ A **task** is a small, self-contained job the agent is asked to do, plus a descr
       FAIL if it uses the SDK directly or invents indexes.
 ```
 
-The agent runs the task. cultivar saves the conversation. An LLM grader reads the conversation against the criteria and returns `{pass, proposed_command, evidence, reasoning, suggestions}`.
+The agent runs the task. cultivar saves the conversation. An LLM grader reads the conversation against the criteria and returns `{pass, proposed_command, evidence, reasoning, suggestions, grader_backend, grader_model}`.
 
 That's the atom. Everything else is composition: many tasks per skill, many runs per task, many runners.
 
@@ -88,10 +88,12 @@ Pass rate is primary. The others are guardrails.
 
 Skill criteria are usually qualitative: *"PASS if the agent uses the right CLI command and explains the result."* Hard to express as regex. An LLM grader reads the natural-language criteria, the conversation, and any post-run state — and judges. We use Claude Haiku by default (cheap, fast, plenty smart for grader work).
 
+There is a second, opt-in backend: **TypeSafe System One**, which is not an LLM in the generative sense — it returns a calibrated probability rather than written prose. It grades the same criteria far more cheaply, at the cost of the `evidence` and `reasoning` fields. Claude stays the default; see [grader.md](grader.md#backends) for when each is the right choice.
+
 The risk is grader drift. Two safeguards:
 
 - **Criteria specificity.** Vague criteria → vague grades. Spell out PASS conditions and concrete failure modes. See [docs/grader.md](grader.md).
-- **Calibration examples.** Anchor the grader with labeled past runs (`examples/<skill>/{pass,fail}/<name>.yaml`). Filtered per-task, included in every grader prompt.
+- **Calibration examples.** Anchor the grader with labeled past runs (`examples/<skill>/{pass,fail}/<name>.yaml`). Filtered per-task, included in every Claude-backend grader prompt. The TypeSafe backend ignores them — see [grader.md](grader.md#backends).
 
 ## Three runners
 

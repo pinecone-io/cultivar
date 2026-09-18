@@ -77,6 +77,15 @@ def _preflight(runner: str, grade: bool, remote: bool) -> list[dict]:
                 "hint": "" if has_key else "Add to .env in cwd or export in shell — or pass --no-grade.",
             }
         )
+        has_ts_key = bool(os.environ.get("TYPESAFE_API_KEY"))
+        rows.append(
+            {
+                "name": "TYPESAFE_API_KEY (optional)",
+                "ok": True,
+                "detail": ("set" if has_ts_key else "not set — fine; only the optional TypeSafe grading backend uses it"),
+                "hint": "",
+            }
+        )
 
     if remote:
         try:

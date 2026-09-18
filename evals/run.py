@@ -466,7 +466,17 @@ def main(
         5, "--parallel", "-p", help="Max concurrent sandboxes when --remote. Ignored locally."
     ),
     grade: bool = typer.Option(
-        False, "--grade", help="After runs finish, invoke the grader and print a report. Requires ANTHROPIC_API_KEY."
+        False,
+        "--grade",
+        help=(
+            "After runs finish, invoke the grader and print a report. Needs the key for whichever "
+            "backend grades: ANTHROPIC_API_KEY by default, TYPESAFE_API_KEY with --grade-backend typesafe."
+        ),
+    ),
+    grade_backend: str = typer.Option(
+        "claude",
+        "--grade-backend",
+        help="With --grade, which grading backend to use: 'claude' (default) or 'typesafe' (needs TYPESAFE_API_KEY).",
     ),
     fail_under: float | None = typer.Option(
         None,
@@ -520,6 +530,15 @@ def main(
         typer.echo(f"  Place your skill in: {base_dir / '<skill-name>' / 'SKILL.md'}")
         raise typer.Exit(1)
     skill_dir_str = str(skill_dir)
+
+    # Validated here rather than left to the grade subprocess, which only runs
+    # after every sandbox has finished — a typo would otherwise cost the whole run.
+    if grade:
+        from evals.framework.grader import BACKENDS
+
+        if grade_backend not in BACKENDS:
+            typer.echo(f"Error: unknown --grade-backend '{grade_backend}'. Available: {', '.join(BACKENDS)}")
+            raise typer.Exit(1)
 
     r = runner_cls(skill_dir=skill_dir_str)
     valid_variants = r.variants()
@@ -582,13 +601,20 @@ def main(
     # Validate env vars upfront before creating any directories or running anything
     validate_env_vars(tasks)
 
-    if grade and not os.environ.get("ANTHROPIC_API_KEY"):
-        typer.echo(
-            "Error: --grade requires ANTHROPIC_API_KEY.\n"
-            "Add ANTHROPIC_API_KEY=sk-ant-... to a .env in this directory (auto-loaded),\n"
-            "or `export ANTHROPIC_API_KEY=...` in your shell."
-        )
-        raise typer.Exit(1)
+    if grade:
+        key_name = "TYPESAFE_API_KEY" if grade_backend == "typesafe" else "ANTHROPIC_API_KEY"
+        if not os.environ.get(key_name):
+            example = "..." if key_name == "TYPESAFE_API_KEY" else "sk-ant-..."
+            typer.echo(
+                f"Error: --grade --grade-backend {grade_backend} requires {key_name}.\n"
+                f"Add {key_name}={example} to a .env in this directory (auto-loaded),\n"
+                f"or `export {key_name}=...` in your shell."
+            )
+            raise typer.Exit(1)
+        # Only the flag's backend is checked: per-task `grader_backend` pins are
+        # resolved by the grader, so a mixed run can still stop at grading time
+        # for the other key. Checked here anyway because the common case is one
+        # backend, and finding out after every sandbox has run is the expensive way.
 
     run_id = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
     if title:
@@ -621,6 +647,7 @@ def main(
     if grade:
         typer.echo("\nGrading...")
         cmd = [sys.executable, "-m", "evals.cli", "grade", str(run_dir), "--skill", skill, "--report"]
+        cmd += ["--backend", grade_backend]
         if fail_under is not None:
             cmd += ["--fail-under", str(fail_under)]
         result = subprocess.run(cmd)

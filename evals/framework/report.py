@@ -29,6 +29,8 @@ def _summarize(grades: list[dict]) -> dict:
         "variants": variants,
         "cost_usd": round(sum(g.get("cost_usd") or 0 for g in grades), 4),
         "duration_s": round(sum(g.get("duration_s") or 0 for g in grades), 1),
+        "graders": sorted({g["grader_backend"] for g in grades if g.get("grader_backend")}),
+        "grader_models": sorted({g["grader_model"] for g in grades if g.get("grader_model")}),
         "failures": [
             {
                 "task_id": g.get("task_id", ""),
@@ -36,6 +38,10 @@ def _summarize(grades: list[dict]) -> dict:
                 "variant": g.get("variant", ""),
                 "run_num": g.get("run_num", 1),
                 "evidence": g.get("evidence", ""),
+                # The only per-failure number the typesafe backend produces.
+                # Without it a trend record can't tell a 0.49 miss from a 0.02 one,
+                # since its `evidence` is the same boilerplate on every row.
+                **({"p_completed": g["typesafe_p_completed"]} if "typesafe_p_completed" in g else {}),
             }
             for g in grades
             if not g.get("pass")
@@ -55,6 +61,19 @@ def _render_md(grades: list[dict], run_name: str) -> str:
         f"{s['total_conversations']} conversation(s) · "
         f"${s['cost_usd']:.4f} · {s['duration_s']:.1f}s",
     ]
+
+    # A markdown report gets pasted into PRs and CI comments, where the reader
+    # has none of the console context. Without this, a typesafe run reads as a
+    # Claude report whose failure notes mysteriously went generic.
+    backends = sorted({g.get("grader_backend", "") for g in grades if g.get("grader_backend")})
+    if backends:
+        models = sorted({g.get("grader_model", "") for g in grades if g.get("grader_model")})
+        lines += ["", f"Graded by: {', '.join(backends)} (`{', '.join(models)}`)"]
+        if "typesafe" in backends:
+            lines.append(
+                "> TypeSafe returns typed judgments, not text — verdicts and probabilities only, "
+                "no quoted evidence or model-written reasoning."
+            )
 
     if s["failures"]:
         lines += ["", f"<details><summary>{len(s['failures'])} failure(s)</summary>", ""]
