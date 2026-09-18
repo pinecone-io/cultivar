@@ -26,10 +26,13 @@ when no `ANTHROPIC_API_KEY` is available) — it runs a packaged smoke task end-
 
 - `cultivar init <skill> [--skills-dir DIR]` — scaffold task YAML + SKILL.md stub.
 - `cultivar run -s <skill> -r <claude|copilot|gemini>` — run. Key flags:
-  - `-t <task>` one task · `-v <with-skill|without-skill|with-docs>` one variant
+  - `-t <task>` one task · `-v <variant>` one variant (see Variants below for the full list)
   - `--remote` run in isolated Modal sandboxes · `-n N` repeat · `-p N` parallelism
   - `--grade` grade after running · `--title NAME` label the run · `--dry-run` print the
     prompt + command without calling anything · `--timeout S` per-call budget (default 90)
+  - `--model ID` pin the agent's model (Claude runner only, e.g. `claude-sonnet-5`);
+    unset uses the CLI's own default. A task's `extra_tools: [WebSearch, WebFetch]`
+    field unions extra tools onto whichever variant it requests.
 - `cultivar grade <run|latest> -s <skill> [--report]` — (re)grade an existing run.
   `--model` picks the grading model (any current Claude model works, including the "-5"
   generation) · `--max-tokens` raises the per-reply budget if evidence/reasoning truncate.
@@ -43,10 +46,27 @@ when no `ANTHROPIC_API_KEY` is available) — it runs a packaged smoke task end-
 - **with-skill** — skill loaded; prompt prefixed `Use the /<skill>`.
 - **without-skill** — no skill; identical otherwise. The baseline.
 - **with-docs** — no skill, but the task's `ground_truth.context_refs` files are prepended.
-  Only runs for tasks that declare `context_refs`.
+  Only runs for tasks that declare `context_refs`. Entries can be local files or
+  `http(s)://` URLs (fetched live, cached under `./.docs_cache`).
 
 Read two deltas: with-skill vs without-skill ("does the skill do anything?") and
 with-skill vs with-docs ("is the distilled skill better than dumping the raw docs?").
+
+### Docs-eval extras (Claude runner only)
+
+Three more real `--variant` choices, opt-in only, not part of the default "run every
+variant" sweep:
+
+- **without-docs** — identical to without-skill, named for docs-testing clarity (this is
+  what "no docs at all" actually means when the thing under test is a doc, not a skill).
+- **self-navigate** — no injected reference material, but WebFetch is enabled and
+  `ground_truth.self_navigate_refs` gives it a starting page. Tests whether the agent can
+  find the right doc on its own; with-docs tests whether the content is good once handed
+  over. Different questions, keep them separate.
+- **`with-docs:<label>`** — set `ground_truth.doc_versions: {label: [refs]}` instead of
+  flat `context_refs`; `--variant with-docs` then auto-expands into one real run per
+  version, graded and reported side by side. Compares two doc versions (e.g. before/after
+  a rewrite) in one command instead of two separate runs you diff by hand.
 
 ## Tasks
 
@@ -59,11 +79,14 @@ tasks:
     category: cli            # or: code-gen
     # setup / teardown / verify: optional shell hooks
     # env: ["SOME_KEY"]      # required env vars, checked upfront
+    # extra_tools: [WebSearch, WebFetch]  # unioned onto whichever variant is requested
     ground_truth:
       criteria: |
         PASS requires <2-3 concrete, checkable things>.
         FAIL if <a common failure mode>.
-      # context_refs: [docs/ref.md]   # activates the with-docs variant
+      # context_refs: [docs/ref.md]      # activates the with-docs variant
+      # self_navigate_refs: [docs/overview.md]  # activates self-navigate (a starting point, not the answer)
+      # doc_versions: {v1: [old.md], v2: [new.md]}  # activates with-docs:v1 / with-docs:v2 instead of flat with-docs
 ```
 
 Guidance:

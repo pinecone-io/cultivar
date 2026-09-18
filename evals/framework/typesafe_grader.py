@@ -74,6 +74,7 @@ SECTION_PARITY: dict[str, str | None] = {
     "Reference Material": "reference_material",
     "Agent Conversation": "agent_conversation",
     "Verification Output": "verification_output",
+    "Execution result": "verification_result",
     "Generated Code Files": "generated_code_files",
     # Few-shot PASS/FAIL examples anchor a text model's threshold. A System One
     # model is calibrated already and is steered by PASS_THRESHOLD instead, so
@@ -179,6 +180,8 @@ def build_state(
     workdir_content: str = "",
     refs_content: str = "",
     skill_content: str = "",
+    verify_exit_code: int | None = None,
+    verify_stderr: str = "",
     fit: bool = True,
 ) -> dict[str, Any]:
     """Assemble the System One state as named JSON fields.
@@ -202,6 +205,13 @@ def build_state(
         state["expected_outcome"] = gt["outcome"]
     if verify_output:
         state["verification_output"] = verify_output
+    if verify_stderr:
+        state["verification_stderr"] = verify_stderr
+    if verify_exit_code is not None:
+        state["verification_exit_code"] = verify_exit_code
+        state["verification_result"] = (
+            "PASSED (exit 0)" if verify_exit_code == 0 else f"FAILED (exit {verify_exit_code})"
+        )
     if workdir_content:
         state["generated_code_files"] = workdir_content
     if refs_content:
@@ -282,7 +292,10 @@ def build_questions() -> dict:
             instructions=(
                 "Judge whether the AI agent successfully completed the task. The agent's run is in "
                 "`agent_conversation`; any files it wrote are in `generated_code_files` and any "
-                "post-run check is in `verification_output`. Judge only against `task_criteria`, "
+                "post-run check is in `verification_output`. When `verification_result` is present "
+                "the agent's code was actually executed, and that is the authoritative signal: "
+                "a FAILED execution means the task failed however well the code reads. "
+                "Judge only against `task_criteria`, "
                 "`expected_commands`, `expected_outcome`, and `acceptable_variations`. "
                 "`reference_material` and `skill_reference` show what correct behavior looks "
                 "like — they are documentation the agent had access to, not its output, so "
@@ -354,6 +367,8 @@ def build_state_for_dry_run(
         workdir_content=workdir_content,
         refs_content=load_context_refs(task.get("ground_truth", {}).get("context_refs", [])),
         skill_content=skill_content,
+        verify_exit_code=conversation.get("verify_exit_code"),
+        verify_stderr=conversation.get("verify_stderr", ""),
         fit=False,
     )
 
@@ -392,6 +407,8 @@ def grade_one_typesafe(
         workdir_content=workdir_content,
         refs_content=load_context_refs(task.get("ground_truth", {}).get("context_refs", [])),
         skill_content=skill_content,
+        verify_exit_code=conversation.get("verify_exit_code"),
+        verify_stderr=conversation.get("verify_stderr", ""),
     )
 
     response = client.system_one(state=state, questions=build_questions(), model=model)

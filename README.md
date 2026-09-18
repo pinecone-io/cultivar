@@ -252,7 +252,7 @@ Each runner advertises three variants:
 
 - `with-skill` — skill loaded, agent invoked via `/<skill-name>`
 - `without-skill` — same agent, no skill loaded and no `Use the /<skill>` prefix in the prompt
-- `with-docs` — same as without-skill, but the task's `context_refs` files are prepended to the prompt as raw reference material. Only runs for tasks that declare `context_refs`.
+- `with-docs` — same as without-skill, but the task's `context_refs` files are prepended to the prompt as raw reference material (local files or `http(s)://` URLs, fetched live and cached under `./.docs_cache`). Only runs for tasks that declare `context_refs`.
 
 Two deltas to read:
 
@@ -262,6 +262,14 @@ Two deltas to read:
 | with-skill vs with-docs | Is my distilled skill better than just dumping the docs into the prompt? |
 
 With `--remote`, each `(task, variant, repeat)` runs in its own Modal sandbox in parallel — three variants on one task means three sandboxes, run concurrently up to `--parallel N` (default 5). Apples-to-apples baseline; same image, only the prompt + skill mounting differ. See [docs/concepts.md](docs/concepts.md#the-controls-with-skill-without-skill-with-docs) for the full discussion and [docs/task-yaml.md](docs/task-yaml.md#variants) for how to add `context_refs` to a task.
+
+**Testing docs, not skills (Claude runner only):** three more real `--variant` choices, opt-in, not part of the default sweep above.
+
+- `without-docs` — identical to without-skill, named for docs-testing clarity
+- `self-navigate` — no injected reference material, but WebFetch is enabled and the task's `self_navigate_refs` gives it a starting page; tests whether the agent can find the right doc on its own (with-docs tests whether the content is good once handed over)
+- `with-docs:<label>` — set `ground_truth.doc_versions: {label: [refs]}` instead of flat `context_refs` and `--variant with-docs` auto-expands into one real run per version, graded side by side, so comparing two doc versions (e.g. before/after a rewrite) is one command, not two runs you diff by hand
+
+Also pin the agent's model with `--model <id>` (e.g. `claude-sonnet-5`, Claude runner only) to re-run the same task set under a different model; unset uses the CLI's own default.
 
 ## Docs
 

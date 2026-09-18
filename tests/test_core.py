@@ -1470,7 +1470,7 @@ class TestOrchestratorCallSurface:
         run_dir.mkdir()
         tasks = [{"id": "t", "intent": "do thing", "ground_truth": {"criteria": "x"}}]
 
-        with patch.object(run_module, "docs_context_for_task", return_value=""):
+        with patch.object(run_module, "resolve_docs_context", return_value=""):
             run_local(
                 tasks=tasks,
                 runner_cls=_Runner,
@@ -1855,6 +1855,7 @@ class TestGraderSectionParity:
         }
 
     def _full_state(self):
+        """Every field a real grade can carry, so parity is checked at full breadth."""
         return self.ts.build_state(
             self._full_task(),
             "CONV_MARKER",
@@ -1862,6 +1863,8 @@ class TestGraderSectionParity:
             workdir_content="WORKDIR_MARKER",
             refs_content="REFS_MARKER",
             skill_content="SKILL_MARKER",
+            verify_exit_code=1,
+            verify_stderr="STDERR_MARKER",
         )
 
     def test_every_claude_section_is_accounted_for(self):
@@ -1874,6 +1877,8 @@ class TestGraderSectionParity:
             "VERIFY_MARKER",
             "WORKDIR_MARKER",
             "REFS_MARKER",
+            verify_exit_code=1,
+            verify_stderr="STDERR_MARKER",
         )
         for section in self.ts.SECTION_PARITY:
             assert section in prompt, f"{section!r} is in SECTION_PARITY but not in the Claude prompt"
@@ -2040,3 +2045,76 @@ class TestSummaryNamesTheGrader:
         del g["grader_backend"], g["grader_model"]
         s = _summarize([g])
         assert s["graders"] == [] and s["grader_models"] == []
+
+
+class TestSectionParityCatchesNewSections:
+    """The reverse direction: a section added to the Claude prompt must be declared.
+
+    The forward check (every SECTION_PARITY key appears in the prompt) cannot
+    catch a section added to the prompt and nowhere else — which is exactly how
+    the execution-verification fields reached Claude and not TypeSafe.
+    """
+
+    # Prompt headings that are instructions to the grader rather than evidence
+    # about the run, so they have no state-field counterpart.
+    NON_EVIDENCE = {"Instructions"}
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        try:
+            from evals.framework import typesafe_grader
+            from evals.framework.grader import build_grader_prompt
+
+            self.ts = typesafe_grader
+            self.build = build_grader_prompt
+        except ImportError:
+            pytest.skip("typesafe-sdk not installed")
+
+    def _headings(self) -> list[str]:
+        prompt = self.build(
+            {
+                "ground_truth": {
+                    "criteria": "C", "commands": ["cmd"], "flexible": ["f"], "outcome": "o",
+                }
+            },
+            "CONV",
+            "## Calibration Examples\n### PASS",
+            "SKILL",
+            "VERIFY",
+            "WORKDIR",
+            "REFS",
+            verify_exit_code=1,
+            verify_stderr="ERR",
+        )
+        return [ln[3:].strip() for ln in prompt.splitlines() if ln.startswith("## ")]
+
+    def test_every_prompt_heading_is_declared_in_section_parity(self):
+        declared = set(self.ts.SECTION_PARITY)
+        for heading in self._headings():
+            if heading in self.NON_EVIDENCE:
+                continue
+            # Headings may carry a qualifier, e.g. "Verification Output (EXECUTION — AUTHORITATIVE)".
+            base = next((d for d in declared if heading.startswith(d)), None)
+            assert base is not None, (
+                f"Prompt section {heading!r} is not in SECTION_PARITY. Add it and map it to a "
+                "TypeSafe state field, or the two backends will grade from different evidence."
+            )
+
+    def test_execution_verification_reaches_typesafe(self):
+        """Regression: these arrived on the Claude side only."""
+        state = self.ts.build_state(
+            {"ground_truth": {"criteria": "C"}},
+            "CONV",
+            verify_output="OUT",
+            verify_exit_code=1,
+            verify_stderr="ERR",
+        )
+        assert state["verification_stderr"] == "ERR"
+        assert state["verification_exit_code"] == 1
+        assert "FAILED" in state["verification_result"]
+
+    def test_passing_execution_is_labelled_too(self):
+        state = self.ts.build_state(
+            {"ground_truth": {"criteria": "C"}}, "CONV", verify_exit_code=0
+        )
+        assert "PASSED" in state["verification_result"]

@@ -219,6 +219,13 @@ results/
 tasks/*
 !tasks/workdir-smoke.yaml
 
+# Skills under test (personal/project-specific) — except the framework's own usage skill
+skills/*
+!skills/cultivar/
+
+# Cached fetched doc pages (evals/framework/grader.py's _fetch_url_ref)
+.docs_cache/
+
 # Calibration examples (skill-specific, not part of framework)
 examples/
 
