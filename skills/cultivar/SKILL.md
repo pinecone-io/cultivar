@@ -44,18 +44,20 @@ when no `ANTHROPIC_API_KEY` is available) — it runs a packaged smoke task end-
 ## Variants (the controls)
 
 - **with-skill** — skill loaded; prompt prefixed `Use the /<skill>`.
-- **without-skill** — no skill; identical otherwise. The baseline.
+- **without-skill** — no skill; identical except that `Skill`/`ToolSearch` drop out of
+  `--allowedTools`. The baseline.
 - **with-docs** — no skill, but the task's `ground_truth.context_refs` files are prepended.
   Only runs for tasks that declare `context_refs`. Entries can be local files or
-  `http(s)://` URLs (fetched live, cached under `./.docs_cache`).
+  `http(s)://` URLs (fetched once and reused from `./.docs_cache`).
 
 Read two deltas: with-skill vs without-skill ("does the skill do anything?") and
 with-skill vs with-docs ("is the distilled skill better than dumping the raw docs?").
 
 ### Docs-eval extras (Claude runner only)
 
-Three more real `--variant` choices, opt-in only, not part of the default "run every
-variant" sweep:
+Three more real `--variant` choices. `without-docs` and `self-navigate` are opt-in;
+`with-docs:<label>` enters the default sweep on its own whenever a task declares
+`doc_versions`:
 
 - **without-docs** — identical to without-skill, named for docs-testing clarity (this is
   what "no docs at all" actually means when the thing under test is a doc, not a skill).

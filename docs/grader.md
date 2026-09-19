@@ -140,7 +140,7 @@ The grader prompt is assembled in this order ([`build_grader_prompt`](../evals/f
 1. **Skill reference** — full `SKILL.md` of `--skill` (auto-detected from `tasks.json` if not passed)
 2. **Criteria** — `task.ground_truth.criteria` verbatim
 3. **Expected** — `commands`, `flexible`, `outcome` (each line if present)
-4. **Reference material** — files listed in `task.ground_truth.context_refs` (cwd-relative paths), included verbatim. Capped at 100 KB combined; missing files warn + skip. Treated as ground truth for "what correct behavior looks like": the grader can use it to judge specifics but can't quote from it as evidence (evidence must come from the actual run). See [docs/task-yaml.md#worked-example-context_refs](task-yaml.md#worked-example-context_refs).
+4. **Reference material** — files listed in `task.ground_truth.context_refs` (cwd-relative or absolute paths), included verbatim. Capped at 100 KB combined; missing files warn + skip. Treated as ground truth for "what correct behavior looks like": the grader can use it to judge specifics but can't quote from it as evidence (evidence must come from the actual run). See [docs/task-yaml.md#worked-example-context_refs](task-yaml.md#worked-example-context_refs).
 5. **Calibration examples** — pass/fail YAMLs filtered by `task_id`
 6. **Agent conversation** — `conversation_md` truncated at 50 KB
 7. **Verification output** — stdout of `task.verify` if defined
@@ -169,12 +169,13 @@ Optional but powerful. Anchor the grader on real pass/fail cases for a specific 
 
 ```yaml
 task_id: my-task-id
-label: pass     # or fail
 agent_proposed: |
   what the agent did or proposed
 reasoning: |
   why this passes (or fails) the criteria
 ```
+
+The verdict comes from the `pass/` or `fail/` directory the file lives in — there is no `label:` field. The loader reads only `task_id`, `agent_proposed`, and `reasoning`.
 
 **Filtering.** Examples are filtered by `task_id`. Only examples matching the active task are included, keeping prompts small and on-topic.
 

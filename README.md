@@ -120,7 +120,7 @@ cultivar hello --no-grade           # just exercise the runner (no API key neede
 cultivar run --skill my-skill --runner claude --task my-task -v with-skill --remote
 
 # All tasks + every applicable variant (with-skill, without-skill, and with-docs
-# for tasks that declare context_refs)
+# for tasks that declare context_refs, or one per label for doc_versions)
 cultivar run --skill my-skill --runner claude --remote
 
 # 3 runs per (task, variant) for reliability, 5 sandboxes at once
@@ -252,7 +252,7 @@ Each runner advertises three variants:
 
 - `with-skill` — skill loaded, agent invoked via `/<skill-name>`
 - `without-skill` — same agent, no skill loaded and no `Use the /<skill>` prefix in the prompt
-- `with-docs` — same as without-skill, but the task's `context_refs` files are prepended to the prompt as raw reference material (local files or `http(s)://` URLs, fetched live and cached under `./.docs_cache`). Only runs for tasks that declare `context_refs`.
+- `with-docs` — same as without-skill, but the task's `context_refs` files are prepended to the prompt as raw reference material (local files or `http(s)://` URLs, fetched once and reused from `./.docs_cache`). Only runs for tasks that declare `context_refs`; a task that declares `doc_versions` instead gets one `with-docs:<label>` run per label (see below).
 
 Two deltas to read:
 
@@ -261,9 +261,9 @@ Two deltas to read:
 | with-skill vs without-skill | Is the skill doing anything at all? |
 | with-skill vs with-docs | Is my distilled skill better than just dumping the docs into the prompt? |
 
-With `--remote`, each `(task, variant, repeat)` runs in its own Modal sandbox in parallel — three variants on one task means three sandboxes, run concurrently up to `--parallel N` (default 5). Apples-to-apples baseline; same image, only the prompt + skill mounting differ. See [docs/concepts.md](docs/concepts.md#the-controls-with-skill-without-skill-with-docs) for the full discussion and [docs/task-yaml.md](docs/task-yaml.md#variants) for how to add `context_refs` to a task.
+With `--remote`, each `(task, variant, repeat)` runs in its own Modal sandbox in parallel, up to `--parallel N` (default 5). The sandbox count is however many of the variants above apply to the task (with-docs only when it declares `context_refs`, or one per entry when it declares `doc_versions`), times `--repeat`. The variants share the same base image and task; prompts, skill mounting, and runner-specific tool or instruction flags differ. See [docs/concepts.md](docs/concepts.md#the-controls-with-skill-without-skill-with-docs) for the full discussion and [docs/task-yaml.md](docs/task-yaml.md#variants) for how to add `context_refs` to a task.
 
-**Testing docs, not skills (Claude runner only):** three more real `--variant` choices, opt-in, not part of the default sweep above.
+**Testing docs, not skills (Claude runner only):** three more real `--variant` choices. `without-docs` and `self-navigate` are opt-in; `with-docs:<label>` enters the default sweep on its own whenever a task declares `doc_versions`.
 
 - `without-docs` — identical to without-skill, named for docs-testing clarity
 - `self-navigate` — no injected reference material, but WebFetch is enabled and the task's `self_navigate_refs` gives it a starting page; tests whether the agent can find the right doc on its own (with-docs tests whether the content is good once handed over)
