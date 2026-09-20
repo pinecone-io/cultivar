@@ -35,7 +35,7 @@ copilot --autopilot --yolo \
 | `--no-custom-instructions` | no | yes | yes |
 | `--excluded-tools skill` | no | yes | yes |
 
-The with-docs prompt is just `f"{docs_context}{intent}"` — the runner concatenates, nothing more. The `docs_context` prefix is built by `load_runner_refs` (`evals/framework/grader.py`), which wraps the `context_refs` in a framing preamble ("Reference these documents…") and appends a `\n---\n\n` divider before the intent. So the divider comes from the grader's ref-loader, not the runner.
+For flat with-docs, the runner prepends `docs_context` to the intent. `load_runner_refs` in `evals/framework/grader.py` builds that prefix, including the framing preamble ("Reference these documents…") and a `\n---\n\n` divider.
 
 **Fairness caveat.** `--no-custom-instructions` disables `AGENTS.md` loading on the bare variants; the with-skill variant doesn't pass it. That means cost/token deltas across variants reflect more than just the skill. We accept this asymmetry on Copilot because there's no equivalent of Claude's `Write`-stripping bug — Copilot's "bare" flags are tool/instruction-level and don't break code-gen. Revisit if you need a strict like-for-like cost comparison.
 

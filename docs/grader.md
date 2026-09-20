@@ -140,7 +140,7 @@ The grader prompt is assembled in this order ([`build_grader_prompt`](../evals/f
 1. **Skill reference** — full `SKILL.md` of `--skill` (auto-detected from `tasks.json` if not passed)
 2. **Criteria** — `task.ground_truth.criteria` verbatim
 3. **Expected** — `commands`, `flexible`, `outcome` (each line if present)
-4. **Reference material** — files listed in `task.ground_truth.context_refs` (cwd-relative or absolute paths), included verbatim. Capped at 100 KB combined; missing files warn + skip. Treated as ground truth for "what correct behavior looks like": the grader can use it to judge specifics but can't quote from it as evidence (evidence must come from the actual run). See [docs/task-yaml.md#worked-example-context_refs](task-yaml.md#worked-example-context_refs).
+4. **Reference material** — cwd-relative or absolute local paths and HTTP(S) URLs in `task.ground_truth.context_refs`. Local text is read directly; URL references reuse cached text or fetch content, with detected HTML converted to text. References share a nominal 100,000-character budget, including per-reference headings and fences; framing and truncation notices add overhead. Missing/unfetchable refs warn + skip. Treated as ground truth for "what correct behavior looks like": the grader can use it to judge specifics but can't quote from it as evidence (evidence must come from the actual run). See [docs/task-yaml.md#worked-example-context_refs](task-yaml.md#worked-example-context_refs).
 5. **Calibration examples** — pass/fail YAMLs filtered by `task_id`
 6. **Agent conversation** — `conversation_md` truncated at 50 KB
 7. **Verification output** — stdout of `task.verify` if defined
@@ -159,7 +159,7 @@ Empty or missing workdirs contribute nothing. The section is omitted from the pr
 
 ## `context_refs` is dual-use
 
-The same files you list under `ground_truth.context_refs` for the grader **also** activate a third runner variant (`with-docs`) that prepends those files to the agent's own prompt. Lets you compare a distilled skill against just dumping the docs into context. See [docs/concepts.md](concepts.md#the-controls-with-skill-without-skill-with-docs) for when to use it. If you only want the grader use and not the runner use, omit the variant via `--variant with-skill` (or `without-skill`); the with-docs variant is only ever auto-included alongside the others.
+Nonempty `ground_truth.context_refs` also enables flat `with-docs` in the default sweep, prepending those references to the agent's prompt. Nonempty `doc_versions` takes precedence and replaces flat with-docs with labeled variants. The grader reads `context_refs` independently. See [docs/concepts.md](concepts.md#the-controls-with-skill-without-skill-with-docs) for when to use the comparison. Select `--variant with-docs` to run only the applicable docs variants. If you only want the grader use, select `--variant with-skill` or `--variant without-skill`.
 
 ## Calibration examples
 
@@ -175,7 +175,7 @@ reasoning: |
   why this passes (or fails) the criteria
 ```
 
-The verdict comes from the `pass/` or `fail/` directory the file lives in — there is no `label:` field. The loader reads only `task_id`, `agent_proposed`, and `reasoning`.
+The verdict comes from the `pass/` or `fail/` directory the file lives in. The loader reads only `task_id`, `agent_proposed`, and `reasoning`; it ignores a `label:` field.
 
 **Filtering.** Examples are filtered by `task_id`. Only examples matching the active task are included, keeping prompts small and on-topic.
 

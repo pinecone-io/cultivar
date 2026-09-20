@@ -2,7 +2,7 @@
 
 Wraps Google's [Gemini CLI](https://github.com/google-gemini/gemini-cli) (`gemini`) as a runner.
 
-> **Note:** this runner is slated for deprecation — see the runner table in the [README](../../README.md#supported-agents).
+> **Note:** this runner is slated for deprecation. See the runner table in the [README](../../README.md#supported-agents).
 
 ## Install
 
@@ -29,7 +29,7 @@ No `--bare` or `--max-turns` flags exist on Gemini. The orchestrator's `--timeou
 | Skill linking | `gemini skills link <path>` (with `Y\n` piped to bypass interactive confirm) | none | none |
 | Working dir | runner's `cwd` (or framework tempdir) | runner's `cwd` (or its own empty tempdir) | runner's `cwd` (or its own empty tempdir) |
 
-The with-docs prompt is just `f"{docs_context}{intent}"` — the runner concatenates, nothing more. The `docs_context` prefix is built by `load_runner_refs` (`evals/framework/grader.py`), which wraps the `context_refs` in a framing preamble ("Reference these documents…") and appends a `\n---\n\n` divider before the intent. So the divider comes from the grader's ref-loader, not the runner.
+For flat with-docs, the runner prepends `docs_context` to the intent. `load_runner_refs` in `evals/framework/grader.py` builds that prefix, including the framing preamble ("Reference these documents…") and a `\n---\n\n` divider.
 
 If the orchestrator passes a `cwd` (the per-task tempdir), every variant uses it. If not, the bare variants make their own empty tempdir so workspace `GEMINI.md` and skills don't leak in. User-level skills under `~/.gemini/skills/` are still present, but without a `/<skill-name>` prompt the agent doesn't invoke them, which is an acceptable baseline.
 

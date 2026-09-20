@@ -44,10 +44,12 @@ when no `ANTHROPIC_API_KEY` is available) — it runs a packaged smoke task end-
 ## Variants (the controls)
 
 - **with-skill** — skill loaded; prompt prefixed `Use the /<skill>`.
-- **without-skill** — no skill; identical except that `Skill`/`ToolSearch` drop out of
-  `--allowedTools`. The baseline.
+- **without-skill** — no skill mounted and no skill-invocation prefix. Claude removes
+  `Skill`/`ToolSearch` from its default `--allowedTools`; Copilot adds
+  `--no-custom-instructions --excluded-tools skill`.
 - **with-docs** — no skill, but the task's `ground_truth.context_refs` files are prepended.
-  Only runs for tasks that declare `context_refs`. Entries can be local files or
+  Requires nonempty `context_refs`; nonempty `doc_versions` takes precedence and
+  replaces it with labeled variants (see below). Entries can be local files or
   `http(s)://` URLs (fetched once and reused from `./.docs_cache`).
 
 Read two deltas: with-skill vs without-skill ("does the skill do anything?") and
@@ -57,14 +59,14 @@ with-skill vs with-docs ("is the distilled skill better than dumping the raw doc
 
 Three more real `--variant` choices. `without-docs` and `self-navigate` are opt-in;
 `with-docs:<label>` enters the default sweep on its own whenever a task declares
-`doc_versions`:
+nonempty `doc_versions`. That expansion runs on every runner, but only Claude
+prepends the labeled content today.
 
 - **without-docs** — identical to without-skill, named for docs-testing clarity (this is
   what "no docs at all" actually means when the thing under test is a doc, not a skill).
-- **self-navigate** — no injected reference material, but WebFetch is enabled and
-  `ground_truth.self_navigate_refs` gives it a starting page. Tests whether the agent can
-  find the right doc on its own; with-docs tests whether the content is good once handed
-  over. Different questions, keep them separate.
+- **self-navigate** — prepends starting-reference content from
+  `ground_truth.self_navigate_refs` and enables WebFetch so the agent can find further
+  docs. Select explicitly with `--variant self-navigate`.
 - **`with-docs:<label>`** — set `ground_truth.doc_versions: {label: [refs]}` instead of
   flat `context_refs`; `--variant with-docs` then auto-expands into one real run per
   version, graded and reported side by side. Compares two doc versions (e.g. before/after
@@ -87,7 +89,7 @@ tasks:
         PASS requires <2-3 concrete, checkable things>.
         FAIL if <a common failure mode>.
       # context_refs: [docs/ref.md]      # activates the with-docs variant
-      # self_navigate_refs: [docs/overview.md]  # activates self-navigate (a starting point, not the answer)
+      # self_navigate_refs: [docs/overview.md]  # starting references for explicit --variant self-navigate
       # doc_versions: {v1: [old.md], v2: [new.md]}  # activates with-docs:v1 / with-docs:v2 instead of flat with-docs
 ```
 

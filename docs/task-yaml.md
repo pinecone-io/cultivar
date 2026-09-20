@@ -38,7 +38,7 @@ That's it. No version, no metadata. The list under `tasks:` is what gets loaded.
 | `commands` | no | list of strings | Expected commands the agent should run. Surfaced to the grader as a hint. |
 | `flexible` | no | list of strings | Notes about acceptable variation (e.g. `"single or double quotes ok"`, `"file extension can be .py or .pyw"`). |
 | `outcome` | no | string | Short description of expected end state. Surfaced to the grader. |
-| `context_refs` | no | list of paths/URLs | Included verbatim as authoritative reference material. Used in **two places**: (1) the grader prompt as `## Reference Material`; (2) the **with-docs** runner variant as a prompt prefix the agent reads before doing the task. Entries are cwd-relative or absolute local files, or `http(s)://` URLs (cached text under `./.docs_cache` is reused as-is; otherwise the Mintlify raw-markdown form is tried first, then the HTML page with its tags stripped to text). Capped at 100 KB total; missing/unfetchable refs warn + skip. Setting this auto-enables a third runner variant alongside with-skill / without-skill. |
+| `context_refs` | no | list of paths/URLs | Loaded as authoritative reference material in **two places**: (1) the grader prompt as `## Reference Material`; (2) the flat **with-docs** runner variant as a prompt prefix. Entries are cwd-relative or absolute local files, or `http(s)://` URLs (cached text under `./.docs_cache` is reused as-is; otherwise the Mintlify raw-markdown form is tried first, then the HTML page with its tags stripped to text). References share a nominal 100,000-character budget, including per-reference headings and fences; framing and truncation notices add overhead. Missing/unfetchable refs warn + skip. Nonempty `context_refs` enables flat with-docs in the default sweep unless nonempty `doc_versions` replaces it with labeled variants. The grader reads `context_refs` independently. |
 | `self_navigate_refs` | no | list of paths/URLs | A starting point, not the answer — used only by the **self-navigate** variant (Claude runner), which also gets WebFetch enabled so it has to find the rest itself. Kept separate from `context_refs` on purpose; mixing them would hand self-navigate the destination page it's supposed to be finding. |
 | `doc_versions` | no | `{label: [refs]}` | Alternative to `context_refs` for comparing doc versions. Each label becomes its own `with-docs:<label>` variant, resolved the same way `context_refs` is (files or URLs). `--variant with-docs` auto-expands into one real run per label instead of a single flat with-docs run. The expansion runs on every runner, but only the Claude runner prepends the labeled content today. |
 
@@ -117,18 +117,18 @@ cultivar run --skill my-skill --task my-task --dry-run # preview the prompt + co
 
 Each runner advertises three variants:
 
-- **with-skill** — agent has the skill loaded (Skill / ToolSearch tools enabled); prompt prepends `Use the /<skill-name> skill.`
-- **without-skill** — no skill loaded and no `Use the /<skill>` prompt prefix. On Claude this is a clean baseline (identical except that `Skill`/`ToolSearch` are dropped from `--allowedTools`); on Copilot it additionally passes `--no-custom-instructions --excluded-tools skill` so AGENTS.md doesn't smuggle skill-equivalent context in. See [docs/concepts.md](concepts.md#the-controls-with-skill-without-skill-with-docs) for the asymmetry caveat.
-- **with-docs** — same posture as without-skill, but the task's `context_refs` files are prepended to the prompt as raw reference material. **Only runs for tasks that declare `context_refs`** — otherwise skipped. A task that declares `doc_versions` instead gets one `with-docs:<label>` run per label (see below).
+- **with-skill** — agent has the skill loaded (Skill / ToolSearch tools enabled on Claude); prompt prepends `Use the /<skill-name> skill.`
+- **without-skill** — no skill loaded and no `Use the /<skill>` prompt prefix. Claude drops `Skill`/`ToolSearch` from its default `--allowedTools`; Copilot additionally passes `--no-custom-instructions --excluded-tools skill` so AGENTS.md doesn't smuggle skill-equivalent context in. See [docs/concepts.md](concepts.md#the-controls-with-skill-without-skill-with-docs) for the asymmetry caveat.
+- **with-docs** — same posture as without-skill, but the task's `context_refs` are prepended to the prompt as reference material. Requires nonempty `context_refs`; nonempty `doc_versions` takes precedence and replaces it with one `with-docs:<label>` run per label (see below).
 
 Use the with-docs delta against with-skill to answer "is my distilled skill better than just pointing the agent at the docs?" With `--remote`, each applicable variant runs in its own parallel sandbox (default `--parallel 5`).
 
 ### Testing docs, not skills (Claude runner only)
 
-Three more real `--variant` choices. `without-docs` and `self-navigate` are opt-in; `with-docs:<label>` enters the default sweep on its own whenever a task declares `doc_versions`:
+Three more real `--variant` choices. `without-docs` and `self-navigate` are opt-in; `with-docs:<label>` enters the default sweep on its own whenever a task declares nonempty `doc_versions`:
 
 - **without-docs** — identical to without-skill, named for docs-testing clarity: when the thing under test is a doc rather than a skill, "no docs at all" reads better than "without-skill."
-- **self-navigate** — no injected reference material, but WebFetch is enabled and `self_navigate_refs` gives it a starting page. Tests whether the agent can find the right doc on its own; with-docs tests whether the content is good once handed over. Different questions.
+- **self-navigate** — prepends starting-reference content from `self_navigate_refs` and enables WebFetch so the agent can find further docs. Select explicitly with `--variant self-navigate`.
 - **`with-docs:<label>`** — generated automatically when a task sets `doc_versions` instead of `context_refs`. `--variant with-docs` expands into one run per label.
 
 ## Worked example: context_refs
@@ -147,9 +147,9 @@ tasks:
         - docs/n8n-best-practices.md
 ```
 
-The grader reads `docs/n8n-best-practices.md` relative to the invocation directory (an absolute path works too), includes its content under a `## Reference Material` section in the prompt, and judges the conversation against it. Mix multiple refs freely; total combined cap is 100 KB.
+The grader reads `docs/n8n-best-practices.md` relative to the invocation directory (an absolute path works too), includes its content under a `## Reference Material` section in the prompt, and judges the conversation against it. References share a nominal 100,000-character budget, including per-reference headings and fences; framing and truncation notices add overhead.
 
-`context_refs` also activates the **with-docs** runner variant for this task: the same files get prepended to the agent's prompt (with a divider before the intent) so the comparison "skill vs raw docs" runs alongside "skill vs nothing." Tasks with neither `context_refs` nor `doc_versions` run only with-skill and without-skill.
+`context_refs` also adds the **with-docs** runner variant to this task's default sweep: the same files get prepended to the agent's prompt (with a divider before the intent) so the comparison "skill vs raw docs" runs alongside "skill vs nothing." The default sweep for tasks with neither `context_refs` nor `doc_versions` runs only with-skill and without-skill.
 
 `context_refs` entries can also be `http(s)://` URLs, fetched once and reused from `./.docs_cache` (no need to `curl` a local copy first anymore).
 
