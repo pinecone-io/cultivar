@@ -25,7 +25,7 @@ class ClaudeRunner(Runner):
         if variant == "with-skill":
             skill_name = Path(self.skill_dir).name if self.skill_dir else ""
             prompt = f"Use the /{skill_name} skill. {intent}" if skill_name else intent
-        elif variant == "with-docs" or variant.startswith("with-docs:") or variant == "self-navigate":
+        elif variant in ("with-docs", "self-navigate") or variant.startswith(("with-docs:", "self-navigate:")):
             prompt = f"{docs_context}{intent}" if docs_context else intent
         else:  # without-skill, without-docs
             prompt = intent
@@ -58,7 +58,7 @@ class ClaudeRunner(Runner):
         # re-enabling globally. A new variant ("bare-baseline") or a YAML
         # flag (`use_bare: true`) is the right shape; baking it into every
         # without-skill / with-docs run is what just bit us.
-        if variant == "self-navigate":
+        if variant == "self-navigate" or variant.startswith("self-navigate:"):
             # WebFetch scoped to this one variant, not via extra_tools, so it
             # can't leak into without-skill/without-docs below.
             tools = ["Bash", "Read", "Write", "Edit", "WebFetch"]

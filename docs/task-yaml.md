@@ -40,7 +40,7 @@ That's it. No version, no metadata. The list under `tasks:` is what gets loaded.
 | `outcome` | no | string | Short description of expected end state. Surfaced to the grader. |
 | `context_refs` | no | list of paths/URLs | Included verbatim as authoritative reference material. Used in **two places**: (1) the grader prompt as `## Reference Material`; (2) the **with-docs** runner variant as a prompt prefix the agent reads before doing the task. Entries are cwd-relative local files or `http(s)://` URLs (fetched live, Mintlify raw-markdown form first then HTML fallback, cached under `./.docs_cache`). Capped at 100 KB total; missing/unfetchable refs warn + skip. Setting this auto-enables a third runner variant alongside with-skill / without-skill. |
 | `self_navigate_refs` | no | list of paths/URLs | A starting point, not the answer — used only by the **self-navigate** variant (Claude runner), which also gets WebFetch enabled so it has to find the rest itself. Kept separate from `context_refs` on purpose; mixing them would hand self-navigate the destination page it's supposed to be finding. |
-| `doc_versions` | no | `{label: [refs]}` | Alternative to `context_refs` for comparing doc versions. Each label becomes its own `with-docs:<label>` variant, resolved the same way `context_refs` is (files or URLs). `--variant with-docs` auto-expands into one real run per label instead of a single flat with-docs run. |
+| `doc_versions` | no | `{label: [refs]}` | Alternative to `context_refs` for comparing doc versions. Each label becomes its own `with-docs:<label>` (or `self-navigate:<label>`) variant, resolved the same way `context_refs` is (files or URLs). `--variant with-docs` auto-expands into one real run per label instead of a single flat with-docs run. |
 
 ## Worked examples
 
@@ -129,7 +129,7 @@ Three more real `--variant` choices, opt-in, not part of the default sweep above
 
 - **without-docs** — identical to without-skill, named for docs-testing clarity: when the thing under test is a doc rather than a skill, "no docs at all" reads better than "without-skill."
 - **self-navigate** — no injected reference material, but WebFetch is enabled and `self_navigate_refs` gives it a starting page. Tests whether the agent can find the right doc on its own; with-docs tests whether the content is good once handed over. Different questions.
-- **`with-docs:<label>`** — generated automatically when a task sets `doc_versions` instead of `context_refs`. `--variant with-docs` expands into one run per label.
+- **`with-docs:<label>`** — generated automatically when a task sets `doc_versions` instead of `context_refs`. `--variant with-docs` expands into one run per label. The same labels also expand `--variant self-navigate` into `self-navigate:<label>`, where each version supplies that arm's starting content (e.g. an old single page vs. a new bucket's overview) and WebFetch is enabled for both, so the two versions get identical treatment.
 
 ## Worked example: context_refs
 

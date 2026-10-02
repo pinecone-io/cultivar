@@ -785,6 +785,64 @@ class TestWithDocsVariantFilter:
         assert out == ["with-skill"]
 
 
+class TestDocVersionsVariants:
+    """doc_versions fans with-docs and self-navigate out into one variant per version."""
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        from evals.run import resolve_docs_context, variants_for_task
+
+        self.filter = variants_for_task
+        self.resolve = resolve_docs_context
+        self.task = {
+            "id": "t",
+            "ground_truth": {
+                "criteria": "x",
+                "context_refs": ["flat.md"],
+                "self_navigate_refs": ["start.md"],
+                "doc_versions": {"old": ["old.md"], "new": ["new.md"]},
+            },
+        }
+
+    def test_with_docs_expands_per_version(self):
+        out = self.filter(self.task, ["with-skill", "with-docs"])
+        assert out == ["with-skill", "with-docs:old", "with-docs:new"]
+
+    def test_self_navigate_expands_per_version(self):
+        out = self.filter(self.task, ["self-navigate"])
+        assert out == ["self-navigate:old", "self-navigate:new"]
+
+    def test_self_navigate_stays_plain_without_doc_versions(self):
+        task = {"id": "t", "ground_truth": {"criteria": "x", "self_navigate_refs": ["start.md"]}}
+        assert self.filter(task, ["self-navigate"]) == ["self-navigate"]
+
+    def test_explicit_labeled_variant_passes_through(self):
+        assert self.filter(self.task, ["self-navigate:old"]) == ["self-navigate:old"]
+
+    def test_context_refs_resolve_per_variant_family(self, monkeypatch):
+        try:
+            import evals.framework.grader as grader
+        except ImportError:
+            pytest.skip("anthropic SDK not installed")
+        monkeypatch.setattr(grader, "load_runner_refs", lambda refs: "|".join(refs))
+        assert self.resolve(self.task, "with-docs") == "flat.md"
+        assert self.resolve(self.task, "with-docs:new") == "new.md"
+        assert self.resolve(self.task, "self-navigate:old") == "old.md"
+        assert self.resolve(self.task, "self-navigate") == "start.md"
+        assert self.resolve(self.task, "without-docs") == ""
+
+    def test_labeled_variants_get_the_right_tools_and_prompt_prefix(self):
+        from evals.runners.claude import ClaudeRunner
+
+        runner = ClaudeRunner(skill_dir="/tmp/skills/s")
+        cmd, prompt = runner.build_command("do it", "self-navigate:new", docs_context="CTX|")
+        assert prompt == "CTX|do it"
+        assert "WebFetch" in cmd[cmd.index("--allowedTools") + 1]
+        cmd, prompt = runner.build_command("do it", "with-docs:new", docs_context="CTX|")
+        assert prompt == "CTX|do it"
+        assert "WebFetch" not in cmd[cmd.index("--allowedTools") + 1]
+
+
 class TestRunnerRefsFraming:
     """load_runner_refs renders refs as an agent-prompt prefix, not grader framing."""
 
