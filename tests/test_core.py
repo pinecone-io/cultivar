@@ -930,6 +930,16 @@ class TestRunnerWithDocsPrompt:
         tools = cmd[allow_idx + 1].split(",")
         assert {"Bash", "Read", "Write", "Edit", "Skill", "ToolSearch"}.issubset(set(tools))
 
+    def test_claude_disables_skills_except_for_with_skill(self):
+        from evals.runners.claude import ClaudeRunner
+
+        r = ClaudeRunner(skill_dir="/tmp/fake-skill")
+        for variant in ("without-docs", "without-skill", "with-docs", "self-navigate", "with-docs:v1", "self-navigate:v1"):
+            cmd, _ = r.build_command("x", variant, max_turns=5)
+            assert "--disable-slash-commands" in cmd, variant
+        cmd, _ = r.build_command("x", "with-skill", max_turns=5)
+        assert "--disable-slash-commands" not in cmd
+
     def test_copilot_with_docs_prepends_and_excludes_skill(self):
         from evals.runners.copilot import CopilotRunner
 

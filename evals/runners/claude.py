@@ -78,6 +78,11 @@ class ClaudeRunner(Runner):
 
         cmd.extend(["--allowedTools", ",".join(tools)])
 
+        # Locally the spawned CLI inherits the user's installed plugins; a plugin
+        # skill that matches the task makes the agent burn turns hunting for it.
+        if variant != "with-skill":
+            cmd.append("--disable-slash-commands")
+
         # Orchestration-level override (`cultivar run --model <id>`), not a task
         # field — lets the same task set re-run unmodified under a different model.
         if model:
