@@ -117,6 +117,10 @@ Default: `claude-haiku-4-5-20251001`. Override with `--model claude-…`. Any cu
 
 - Older models (`claude-haiku-4-5`, `claude-sonnet-4-6`, the 4.x Opus/Sonnet line) already default to no thinking. Nothing changes for them.
 - Bare or dated "-5" models (`claude-opus-5`, `claude-sonnet-5`, `claude-haiku-5`, `claude-opus-5-20260315`, …) think by default, so the grader explicitly sends `thinking: {"type": "disabled"}`.
+- The "-5-5" point releases each turn thinking off differently, and the wrong setting is a 400, so they're matched by exact id (with or without a `-YYYYMMDD` snapshot suffix). All three also send `output_config.format` with a JSON schema for the grader's reply, so the model can't put prose before the JSON:
+  - `claude-haiku-5-5`: `thinking: {"type": "disabled"}`.
+  - `claude-sonnet-5-5`: `thinking: {"type": "between_tools"}`. It rejects `disabled`, and with no tools on the grader call it never thinks.
+  - `claude-opus-5-5`: rejects `disabled` at every effort, so it's handled like Fable 5 below.
 - `claude-fable-5` / `claude-mythos-5` (and their dated snapshots) can't disable thinking at all. The grader omits the `thinking` param, runs at `effort: low` to keep thinking shallow, and doubles `--max-tokens` since thinking and the JSON reply share the same budget.
 
 Response parsing scans past leading `thinking`/`redacted_thinking` blocks for the first text block instead of assuming it's `content[0]`. It still raises loudly on any other unexpected block type, e.g. `tool_use`, since this call never passes tools and seeing one means something is misconfigured.
@@ -125,7 +129,7 @@ Response parsing scans past leading `thinking`/`redacted_thinking` blocks for th
 
 `--max-tokens` (default `4096`) caps each grader reply.
 
-Raise it if `evidence`/`reasoning` are getting truncated. Check `grades.json` for a `reasoning` mentioning `_salvage_truncated_grade`'s header-only recovery. Models that can't disable thinking (`claude-fable-5`, `claude-mythos-5`) already get double whatever value you pass here.
+Raise it if `evidence`/`reasoning` are getting truncated. Check `grades.json` for a `reasoning` mentioning `_salvage_truncated_grade`'s header-only recovery. Models that can't disable thinking (`claude-fable-5`, `claude-mythos-5`, `claude-opus-5-5`) already get double whatever value you pass here.
 
 ## Grader call failures
 
