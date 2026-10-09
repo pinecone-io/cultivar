@@ -371,13 +371,6 @@ def _render(run: dict, grade: dict | None, mode: str) -> None:
     else:
         console.print("[dim]## Grader[/dim]\n[dim](not graded yet — run `cultivar grade <run>`)[/dim]\n")
 
-    label = "pass" if grade and grade.get("pass") else "fail"
-    selector = f"-r {run['runner']} -t {run['task_id']} -v {run['variant']}"
-    console.print(
-        f"[dim]Promote this run to a calibration example:[/dim]\n"
-        f'  cultivar examples add {selector} --label {label} --reason "..."'
-    )
-
 
 @app.command()
 def main(
