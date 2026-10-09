@@ -785,6 +785,64 @@ class TestWithDocsVariantFilter:
         assert out == ["with-skill"]
 
 
+class TestDocVersionsVariants:
+    """doc_versions fans with-docs and self-navigate out into one variant per version."""
+
+    @pytest.fixture(autouse=True)
+    def _import(self):
+        from evals.run import resolve_docs_context, variants_for_task
+
+        self.filter = variants_for_task
+        self.resolve = resolve_docs_context
+        self.task = {
+            "id": "t",
+            "ground_truth": {
+                "criteria": "x",
+                "context_refs": ["flat.md"],
+                "self_navigate_refs": ["start.md"],
+                "doc_versions": {"old": ["old.md"], "new": ["new.md"]},
+            },
+        }
+
+    def test_with_docs_expands_per_version(self):
+        out = self.filter(self.task, ["with-skill", "with-docs"])
+        assert out == ["with-skill", "with-docs:old", "with-docs:new"]
+
+    def test_self_navigate_expands_per_version(self):
+        out = self.filter(self.task, ["self-navigate"])
+        assert out == ["self-navigate:old", "self-navigate:new"]
+
+    def test_self_navigate_stays_plain_without_doc_versions(self):
+        task = {"id": "t", "ground_truth": {"criteria": "x", "self_navigate_refs": ["start.md"]}}
+        assert self.filter(task, ["self-navigate"]) == ["self-navigate"]
+
+    def test_explicit_labeled_variant_passes_through(self):
+        assert self.filter(self.task, ["self-navigate:old"]) == ["self-navigate:old"]
+
+    def test_context_refs_resolve_per_variant_family(self, monkeypatch):
+        try:
+            import evals.framework.grader as grader
+        except ImportError:
+            pytest.skip("anthropic SDK not installed")
+        monkeypatch.setattr(grader, "load_runner_refs", lambda refs: "|".join(refs))
+        assert self.resolve(self.task, "with-docs") == "flat.md"
+        assert self.resolve(self.task, "with-docs:new") == "new.md"
+        assert self.resolve(self.task, "self-navigate:old") == "old.md"
+        assert self.resolve(self.task, "self-navigate") == "start.md"
+        assert self.resolve(self.task, "without-docs") == ""
+
+    def test_labeled_variants_get_the_right_tools_and_prompt_prefix(self):
+        from evals.runners.claude import ClaudeRunner
+
+        runner = ClaudeRunner(skill_dir="/tmp/skills/s")
+        cmd, prompt = runner.build_command("do it", "self-navigate:new", docs_context="CTX|")
+        assert prompt == "CTX|do it"
+        assert "WebFetch" in cmd[cmd.index("--allowedTools") + 1]
+        cmd, prompt = runner.build_command("do it", "with-docs:new", docs_context="CTX|")
+        assert prompt == "CTX|do it"
+        assert "WebFetch" not in cmd[cmd.index("--allowedTools") + 1]
+
+
 class TestRunnerRefsFraming:
     """load_runner_refs renders refs as an agent-prompt prefix, not grader framing."""
 
@@ -871,6 +929,16 @@ class TestRunnerWithDocsPrompt:
         allow_idx = cmd.index("--allowedTools")
         tools = cmd[allow_idx + 1].split(",")
         assert {"Bash", "Read", "Write", "Edit", "Skill", "ToolSearch"}.issubset(set(tools))
+
+    def test_claude_disables_skills_except_for_with_skill(self):
+        from evals.runners.claude import ClaudeRunner
+
+        r = ClaudeRunner(skill_dir="/tmp/fake-skill")
+        for variant in ("without-docs", "without-skill", "with-docs", "self-navigate", "with-docs:v1", "self-navigate:v1"):
+            cmd, _ = r.build_command("x", variant, max_turns=5)
+            assert "--disable-slash-commands" in cmd, variant
+        cmd, _ = r.build_command("x", "with-skill", max_turns=5)
+        assert "--disable-slash-commands" not in cmd
 
     def test_copilot_with_docs_prepends_and_excludes_skill(self):
         from evals.runners.copilot import CopilotRunner
@@ -1087,6 +1155,44 @@ class TestGraderRequestKwargs:
         assert self.kwargs("claude-opus-5", 2000) == {"max_tokens": 2000, "thinking": {"type": "disabled"}}
         assert self.kwargs("claude-fable-5", 2000) == {"max_tokens": 4000, "output_config": {"effort": "low"}}
 
+    def _reply_format(self):
+        from evals.framework.grader import GRADER_REPLY_SCHEMA
+
+        return {"type": "json_schema", "schema": GRADER_REPLY_SCHEMA}
+
+    @pytest.mark.parametrize("suffix", ["", "-20260901"])
+    def test_haiku_5_5_disables_thinking_with_json_schema(self, suffix):
+        assert self.kwargs("claude-haiku-5-5" + suffix) == {
+            "max_tokens": 4096,
+            "thinking": {"type": "disabled"},
+            "output_config": {"format": self._reply_format()},
+        }
+
+    @pytest.mark.parametrize("suffix", ["", "-20260901"])
+    def test_sonnet_5_5_uses_between_tools_with_json_schema(self, suffix):
+        assert self.kwargs("claude-sonnet-5-5" + suffix) == {
+            "max_tokens": 4096,
+            "thinking": {"type": "between_tools"},
+            "output_config": {"format": self._reply_format()},
+        }
+
+    @pytest.mark.parametrize("suffix", ["", "-20260901"])
+    def test_opus_5_5_is_handled_like_always_thinking(self, suffix):
+        assert self.kwargs("claude-opus-5-5" + suffix) == {
+            "max_tokens": 8192,
+            "output_config": {"effort": "low", "format": self._reply_format()},
+        }
+
+    def test_point_release_custom_base_max_tokens(self):
+        assert self.kwargs("claude-haiku-5-5", 2000)["max_tokens"] == 2000
+        assert self.kwargs("claude-sonnet-5-5", 2000)["max_tokens"] == 2000
+        assert self.kwargs("claude-opus-5-5", 2000)["max_tokens"] == 4000
+
+    def test_pre_point_release_models_are_unchanged(self):
+        assert self.kwargs("claude-haiku-4-5") == {"max_tokens": 4096}
+        assert self.kwargs("claude-sonnet-5") == {"max_tokens": 4096, "thinking": {"type": "disabled"}}
+        assert self.kwargs("claude-fable-5") == {"max_tokens": 8192, "output_config": {"effort": "low"}}
+
 
 class TestGradeOneThinkingModels:
     """grade_one: request shape and response parsing across model families."""
@@ -1133,6 +1239,20 @@ class TestGradeOneThinkingModels:
         call = client.messages.calls[0]
         assert "thinking" not in call
         assert call["output_config"] == {"effort": "low"}
+        assert call["max_tokens"] == 8192
+        assert grade["pass"] is True
+
+    def test_point_release_models_send_their_own_thinking_kwargs(self):
+        task, conversation = self._task_and_conversation()
+        client = self._fake_client([self.TextBlock(type="text", text='{"pass": true}')])
+        self.grade_one(client, "claude-sonnet-5-5", task, conversation, examples_block="")
+        assert client.messages.calls[0]["thinking"] == {"type": "between_tools"}
+
+        client = self._fake_client([self.TextBlock(type="text", text='{"pass": true}')])
+        grade = self.grade_one(client, "claude-opus-5-5", task, conversation, examples_block="")
+        call = client.messages.calls[0]
+        assert "thinking" not in call
+        assert call["output_config"]["effort"] == "low"
         assert call["max_tokens"] == 8192
         assert grade["pass"] is True
 

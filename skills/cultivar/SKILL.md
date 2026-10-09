@@ -70,7 +70,9 @@ prepends the labeled content today.
 - **`with-docs:<label>`** — set `ground_truth.doc_versions: {label: [refs]}` instead of
   flat `context_refs`; `--variant with-docs` then auto-expands into one real run per
   version, graded and reported side by side. Compares two doc versions (e.g. before/after
-  a rewrite) in one command instead of two separate runs you diff by hand.
+  a rewrite) in one command instead of two separate runs you diff by hand. The same labels
+  expand `--variant self-navigate` into `self-navigate:<label>` for identical-treatment
+  comparisons (a starting page plus WebFetch for every version).
 
 ## Tasks
 
@@ -90,7 +92,7 @@ tasks:
         FAIL if <a common failure mode>.
       # context_refs: [docs/ref.md]      # activates the with-docs variant
       # self_navigate_refs: [docs/overview.md]  # starting references for explicit --variant self-navigate
-      # doc_versions: {v1: [old.md], v2: [new.md]}  # activates with-docs:v1 / with-docs:v2 instead of flat with-docs
+      # doc_versions: {v1: [old.md], v2: [new.md]}  # with-docs:v1 / with-docs:v2 (or self-navigate:v1 / :v2) instead of the flat variants
 ```
 
 Guidance:

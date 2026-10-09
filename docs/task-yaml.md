@@ -40,7 +40,7 @@ That's it. No version, no metadata. The list under `tasks:` is what gets loaded.
 | `outcome` | no | string | Short description of expected end state. Surfaced to the grader. |
 | `context_refs` | no | list of paths/URLs | Loaded as authoritative reference material in **two places**: (1) the grader prompt as `## Reference Material`; (2) the flat **with-docs** runner variant as a prompt prefix. Entries are cwd-relative or absolute local files, or `http(s)://` URLs (cached text under `./.docs_cache` is reused as-is; otherwise the Mintlify raw-markdown form is tried first, then the HTML page with its tags stripped to text). References share a nominal 100,000-character budget, including per-reference headings and fences; framing and truncation notices add overhead. Missing/unfetchable refs warn + skip. Nonempty `context_refs` enables flat with-docs in the default sweep unless nonempty `doc_versions` replaces it with labeled variants. The grader reads `context_refs` independently. |
 | `self_navigate_refs` | no | list of paths/URLs | A starting point, not the answer — used only by the **self-navigate** variant (Claude runner), which also gets WebFetch enabled so it has to find the rest itself. Kept separate from `context_refs` on purpose; mixing them would hand self-navigate the destination page it's supposed to be finding. |
-| `doc_versions` | no | `{label: [refs]}` | Alternative to `context_refs` for comparing doc versions. Each label becomes its own `with-docs:<label>` variant, resolved the same way `context_refs` is (files or URLs). `--variant with-docs` auto-expands into one real run per label instead of a single flat with-docs run. The expansion runs on every runner, but only the Claude runner prepends the labeled content today. |
+| `doc_versions` | no | `{label: [refs]}` | Alternative to `context_refs` for comparing doc versions. Each label becomes its own `with-docs:<label>` (or `self-navigate:<label>`) variant, resolved the same way `context_refs` is (files or URLs). `--variant with-docs` auto-expands into one real run per label instead of a single flat with-docs run. The `with-docs:<label>` expansion runs on every runner, but only the Claude runner prepends the labeled content today. |
 
 ## Worked examples
 
@@ -128,8 +128,8 @@ Use the with-docs delta against with-skill to answer "is my distilled skill bett
 Three more real `--variant` choices. `without-docs` and `self-navigate` are opt-in; `with-docs:<label>` enters the default sweep on its own whenever a task declares nonempty `doc_versions`:
 
 - **without-docs** — identical to without-skill, named for docs-testing clarity: when the thing under test is a doc rather than a skill, "no docs at all" reads better than "without-skill."
-- **self-navigate** — prepends starting-reference content from `self_navigate_refs` and enables WebFetch so the agent can find further docs. Select explicitly with `--variant self-navigate`.
-- **`with-docs:<label>`** — generated automatically when a task sets `doc_versions` instead of `context_refs`. `--variant with-docs` expands into one run per label.
+- **self-navigate** — prepends starting-reference content from `self_navigate_refs` and enables WebFetch so the agent can find further docs. Tests whether the agent can find the right doc on its own; with-docs tests whether the content is good once handed over. Select explicitly with `--variant self-navigate`.
+- **`with-docs:<label>`** — generated automatically when a task sets `doc_versions` instead of `context_refs`. `--variant with-docs` expands into one run per label. The same labels also expand `--variant self-navigate` into `self-navigate:<label>`, where each version supplies that arm's starting content (e.g. an old single page vs. a new bucket's overview) and WebFetch is enabled for both, so the two versions get identical treatment.
 
 ## Worked example: context_refs
 
