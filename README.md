@@ -267,9 +267,11 @@ With `--remote`, each `(task, variant, repeat)` runs in its own Modal sandbox in
 
 - `without-docs` — identical to without-skill, named for docs-testing clarity
 - `self-navigate` — no injected reference material, but WebFetch is enabled and the task's `self_navigate_refs` gives it a starting page; tests whether the agent can find the right doc on its own (with-docs tests whether the content is good once handed over)
-- `with-docs:<label>` — set `ground_truth.doc_versions: {label: [refs]}` instead of flat `context_refs` and `--variant with-docs` auto-expands into one real run per version, graded side by side, so comparing two doc versions (e.g. before/after a rewrite) is one command, not two runs you diff by hand
+- `with-docs:<label>` — set `ground_truth.doc_versions: {label: [refs]}` instead of flat `context_refs` and `--variant with-docs` auto-expands into one real run per version, graded side by side, so comparing two doc versions (e.g. before/after a rewrite) is one command, not two runs you diff by hand. The same labels expand `--variant self-navigate` into `self-navigate:<label>`, so both versions can be tested with identical treatment (a starting page plus WebFetch).
 
 Also pin the agent's model with `--model <id>` (e.g. `claude-sonnet-5`, Claude runner only) to re-run the same task set under a different model; unset uses the CLI's own default.
+
+Every Claude variant except `with-skill` runs with `--disable-slash-commands`, so skills from plugins installed on your machine can't leak into a local run (an agent that goes looking for a blocked plugin skill burns its turns and never writes the file). `--variant` takes one value per invocation.
 
 ## Docs
 

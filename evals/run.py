@@ -86,16 +86,18 @@ def variants_for_task(task: dict, requested: list[str]) -> list[str]:
     declares `ground_truth.doc_versions` (a {label: [refs]} dict) instead gets
     one `with-docs:<label>` variant per version, in place of the single flat
     with-docs -- comparing two doc versions is then one `cultivar run`, not a
-    manual diff between two separate runs.
+    manual diff between two separate runs. The same `doc_versions` also expand
+    `self-navigate` into `self-navigate:<label>`, each version supplying that
+    arm's starting content.
     """
     doc_versions = task.get("ground_truth", {}).get("doc_versions") or {}
     has_refs = bool(task.get("ground_truth", {}).get("context_refs"))
     result = []
     for v in requested:
-        if v != "with-docs":
+        if v in ("with-docs", "self-navigate") and doc_versions:
+            result.extend(f"{v}:{label}" for label in doc_versions)
+        elif v != "with-docs":
             result.append(v)
-        elif doc_versions:
-            result.extend(f"with-docs:{label}" for label in doc_versions)
         elif has_refs:
             result.append(v)
     return result
@@ -106,12 +108,13 @@ def resolve_docs_context(task: dict, variant: str) -> str:
 
     Covers three cases, each reading a different ground_truth field so they
     can't cross-contaminate: the flat with-docs (`context_refs`), a specific
-    doc version (`doc_versions[label]`, for `with-docs:<label>` variants), and
-    self-navigate (`self_navigate_refs` -- a starting point, not the answer,
-    so it must stay separate from with-docs's full reference set).
+    doc version (`doc_versions[label]`, for `with-docs:<label>` and
+    `self-navigate:<label>` variants), and plain self-navigate
+    (`self_navigate_refs` -- a starting point, not the answer, so it must stay
+    separate from with-docs's full reference set).
     """
     gt = task.get("ground_truth", {})
-    if variant.startswith("with-docs:"):
+    if variant.startswith(("with-docs:", "self-navigate:")):
         label = variant.split(":", 1)[1]
         refs = (gt.get("doc_versions") or {}).get(label) or []
     elif variant == "with-docs":
@@ -547,12 +550,13 @@ def main(
     # them (e.g. Arjun's skill tests) don't pick up extra cost by default.
     docs_eval_variants = {"without-docs", "self-navigate"} if runner == "claude" else set()
     if variant:
-        # A specific doc_versions label (with-docs:<label>) is also a real,
-        # explicit choice -- accepted without being in the default sweep, same
-        # as the other docs-eval variants above.
-        is_doc_version = runner == "claude" and variant.startswith("with-docs:")
+        # A specific doc_versions label (with-docs:<label> or
+        # self-navigate:<label>) is also a real, explicit choice -- accepted
+        # without being in the default sweep, same as the other docs-eval
+        # variants above.
+        is_doc_version = runner == "claude" and variant.startswith(("with-docs:", "self-navigate:"))
         if variant not in valid_variants and variant not in docs_eval_variants and not is_doc_version:
-            available = valid_variants + sorted(docs_eval_variants) + ["with-docs:<label>"]
+            available = valid_variants + sorted(docs_eval_variants) + ["with-docs:<label>", "self-navigate:<label>"]
             typer.echo(f"Error: Unknown variant '{variant}'. Available: {available}")
             raise typer.Exit(1)
         variants = [variant]
