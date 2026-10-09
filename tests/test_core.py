@@ -1155,6 +1155,44 @@ class TestGraderRequestKwargs:
         assert self.kwargs("claude-opus-5", 2000) == {"max_tokens": 2000, "thinking": {"type": "disabled"}}
         assert self.kwargs("claude-fable-5", 2000) == {"max_tokens": 4000, "output_config": {"effort": "low"}}
 
+    def _reply_format(self):
+        from evals.framework.grader import GRADER_REPLY_SCHEMA
+
+        return {"type": "json_schema", "schema": GRADER_REPLY_SCHEMA}
+
+    @pytest.mark.parametrize("suffix", ["", "-20260901"])
+    def test_haiku_5_5_disables_thinking_with_json_schema(self, suffix):
+        assert self.kwargs("claude-haiku-5-5" + suffix) == {
+            "max_tokens": 4096,
+            "thinking": {"type": "disabled"},
+            "output_config": {"format": self._reply_format()},
+        }
+
+    @pytest.mark.parametrize("suffix", ["", "-20260901"])
+    def test_sonnet_5_5_uses_between_tools_with_json_schema(self, suffix):
+        assert self.kwargs("claude-sonnet-5-5" + suffix) == {
+            "max_tokens": 4096,
+            "thinking": {"type": "between_tools"},
+            "output_config": {"format": self._reply_format()},
+        }
+
+    @pytest.mark.parametrize("suffix", ["", "-20260901"])
+    def test_opus_5_5_is_handled_like_always_thinking(self, suffix):
+        assert self.kwargs("claude-opus-5-5" + suffix) == {
+            "max_tokens": 8192,
+            "output_config": {"effort": "low", "format": self._reply_format()},
+        }
+
+    def test_point_release_custom_base_max_tokens(self):
+        assert self.kwargs("claude-haiku-5-5", 2000)["max_tokens"] == 2000
+        assert self.kwargs("claude-sonnet-5-5", 2000)["max_tokens"] == 2000
+        assert self.kwargs("claude-opus-5-5", 2000)["max_tokens"] == 4000
+
+    def test_pre_point_release_models_are_unchanged(self):
+        assert self.kwargs("claude-haiku-4-5") == {"max_tokens": 4096}
+        assert self.kwargs("claude-sonnet-5") == {"max_tokens": 4096, "thinking": {"type": "disabled"}}
+        assert self.kwargs("claude-fable-5") == {"max_tokens": 8192, "output_config": {"effort": "low"}}
+
 
 class TestGradeOneThinkingModels:
     """grade_one: request shape and response parsing across model families."""
@@ -1201,6 +1239,20 @@ class TestGradeOneThinkingModels:
         call = client.messages.calls[0]
         assert "thinking" not in call
         assert call["output_config"] == {"effort": "low"}
+        assert call["max_tokens"] == 8192
+        assert grade["pass"] is True
+
+    def test_point_release_models_send_their_own_thinking_kwargs(self):
+        task, conversation = self._task_and_conversation()
+        client = self._fake_client([self.TextBlock(type="text", text='{"pass": true}')])
+        self.grade_one(client, "claude-sonnet-5-5", task, conversation, examples_block="")
+        assert client.messages.calls[0]["thinking"] == {"type": "between_tools"}
+
+        client = self._fake_client([self.TextBlock(type="text", text='{"pass": true}')])
+        grade = self.grade_one(client, "claude-opus-5-5", task, conversation, examples_block="")
+        call = client.messages.calls[0]
+        assert "thinking" not in call
+        assert call["output_config"]["effort"] == "low"
         assert call["max_tokens"] == 8192
         assert grade["pass"] is True
 

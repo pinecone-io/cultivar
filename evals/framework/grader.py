@@ -107,6 +107,57 @@ _ALWAYS_THINKS = re.compile(r"^claude-(fable|mythos)-\d+(-\d{8})?$")
 # no thinking and need no extra kwargs here.
 _THINKS_BY_DEFAULT = re.compile(r"^claude-(opus|sonnet|haiku)-\d+(-\d{8})?$")
 
+_DATED_SNAPSHOT = re.compile(r"-\d{8}$")
+
+# JSON shape the grader prompt asks for, enforced via `output_config.format`
+# on the point-release models below. Haiku 5.5 otherwise sometimes writes
+# prose before the JSON even with thinking off.
+GRADER_REPLY_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["pass", "proposed_command", "evidence", "reasoning", "suggestions"],
+    "properties": {
+        "pass": {"type": "boolean"},
+        "proposed_command": {"type": "string"},
+        "evidence": {"type": "string"},
+        "reasoning": {"type": "string"},
+        "suggestions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["cause", "fix"],
+                "properties": {"cause": {"type": "string"}, "fix": {"type": "string"}},
+            },
+        },
+    },
+}
+_GRADER_REPLY_FORMAT = {"type": "json_schema", "schema": GRADER_REPLY_SCHEMA}
+
+# Point-release ids (`claude-<family>-5-5`) each turn thinking off differently,
+# and the wrong way is a 400, so they're keyed by exact id (dated snapshot
+# suffix stripped) rather than a wider regex:
+# - haiku-5-5 accepts `disabled` at its default effort.
+# - sonnet-5-5 rejects `disabled`; `between_tools` is its off switch, and with
+#   no tools on the grader call it never thinks.
+# - opus-5-5 rejects `disabled` at every effort, so it's handled like Fable 5.
+_POINT_RELEASE_KWARGS = {
+    "claude-haiku-5-5": lambda base: {
+        "max_tokens": base,
+        "thinking": {"type": "disabled"},
+        "output_config": {"format": _GRADER_REPLY_FORMAT},
+    },
+    "claude-sonnet-5-5": lambda base: {
+        "max_tokens": base,
+        "thinking": {"type": "between_tools"},
+        "output_config": {"format": _GRADER_REPLY_FORMAT},
+    },
+    "claude-opus-5-5": lambda base: {
+        "max_tokens": base * 2,
+        "output_config": {"effort": "low", "format": _GRADER_REPLY_FORMAT},
+    },
+}
+
 
 def _grader_request_kwargs(model: str, base_max_tokens: int = GRADER_MAX_TOKENS) -> dict:
     """All extra `messages.create` kwargs for a grader call, keyed by model alone.
@@ -125,8 +176,12 @@ def _grader_request_kwargs(model: str, base_max_tokens: int = GRADER_MAX_TOKENS)
     shallow with a low effort, and double `base_max_tokens` since thinking
     and the reply share it (see `grade_one`'s response parsing, which scans
     past leading thinking blocks instead of assuming the reply is
-    `content[0]`).
+    `content[0]`). The "-5-5" point releases each need their own off switch
+    -- see `_POINT_RELEASE_KWARGS`.
     """
+    point_release = _POINT_RELEASE_KWARGS.get(_DATED_SNAPSHOT.sub("", model))
+    if point_release is not None:
+        return point_release(base_max_tokens)
     if _ALWAYS_THINKS.match(model):
         return {"max_tokens": base_max_tokens * 2, "output_config": {"effort": "low"}}
     if _THINKS_BY_DEFAULT.match(model):
@@ -918,7 +973,7 @@ def main(
         "--max-tokens",
         help=(
             "Max tokens for each grader reply. Doubled automatically for models that "
-            f"can't disable thinking (e.g. claude-fable-5). Default: {GRADER_MAX_TOKENS}."
+            f"can't disable thinking (claude-fable-5, claude-mythos-5, claude-opus-5-5). Default: {GRADER_MAX_TOKENS}."
         ),
     ),
     report: bool = typer.Option(
