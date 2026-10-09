@@ -213,7 +213,7 @@ WORKDIR_INCLUDE_EXTS = {".py", ".ts", ".tsx", ".js", ".jsx", ".json", ".yaml", "
 WORKDIR_INCLUDE_NAMES = {"Dockerfile", "Makefile", "requirements.txt", "pyproject.toml", "package.json", ".env.example"}
 WORKDIR_SKIP_DIRS = {"__pycache__", "node_modules", ".venv", ".git", "dist", "build"}
 WORKDIR_CAP_BYTES = 40_000
-CONTEXT_REFS_CAP_BYTES = 100_000
+CONTEXT_REFS_CAP_CHARS = 100_000
 
 _LANG_BY_EXT = {
     ".py": "python",
@@ -339,8 +339,8 @@ def _fetch_url_ref(ref: str, cap: int) -> str | None:
     return None
 
 
-def _resolve_refs_body(refs: list[str], cap: int = CONTEXT_REFS_CAP_BYTES) -> tuple[str, int]:
-    """Read each ref, render as fenced markdown sections, capped at `cap` bytes total.
+def _resolve_refs_body(refs: list[str], cap: int = CONTEXT_REFS_CAP_CHARS) -> tuple[str, int]:
+    """Read each ref, render as fenced markdown sections, capped at `cap` characters total.
 
     Returns (body, skipped_capped). `body` is the concatenated content with no
     top-level section header — callers add their own framing. Missing files are
@@ -404,7 +404,7 @@ def load_context_refs(refs: list[str]) -> str:
 
     Each entry in `refs` is a cwd-relative (or absolute) path. Content is
     concatenated under '## Reference Material' and capped at
-    CONTEXT_REFS_CAP_BYTES total.
+    CONTEXT_REFS_CAP_CHARS characters total.
     """
     body, skipped = _resolve_refs_body(refs)
     if not body:
@@ -417,7 +417,7 @@ def load_context_refs(refs: list[str]) -> str:
         "contain the actual run.\n" + body
     )
     if skipped:
-        out += f"\n... ({skipped} file(s) truncated or omitted to stay under {CONTEXT_REFS_CAP_BYTES} byte cap)\n"
+        out += f"\n... ({skipped} file(s) truncated or omitted to stay under {CONTEXT_REFS_CAP_CHARS:,} character cap)\n"
     return out
 
 
@@ -438,7 +438,7 @@ def load_runner_refs(refs: list[str]) -> str:
         "the task itself follows after the divider.\n" + body
     )
     if skipped:
-        out += f"\n... ({skipped} file(s) truncated or omitted to stay under {CONTEXT_REFS_CAP_BYTES} byte cap)\n"
+        out += f"\n... ({skipped} file(s) truncated or omitted to stay under {CONTEXT_REFS_CAP_CHARS:,} character cap)\n"
     out += "\n---\n\n"
     return out
 

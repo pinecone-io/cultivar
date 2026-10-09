@@ -56,8 +56,8 @@ tasks:
   # in the agent's prompt?" Only tasks that declare `context_refs` get the
   # with-docs variant; without it, runs are just the standard two variants.
   #
-  # Paths are cwd-relative or absolute. Combined cap: 100 KB. URLs not yet
-  # supported — `curl https://... > docs/refs/source.md` first.
+  # Paths are cwd-relative or absolute, or http(s):// URLs (cached under
+  # ./.docs_cache). Combined cap: 100,000 characters.
   - id: example-task-with-context-refs
     intent: "do the thing per your team's best-practices doc"
     ground_truth:

@@ -644,9 +644,11 @@ def main(
         run_local(tasks, runner_cls, variants, skill_dir_str, max_turns, repeat, run_dir, timeout, model=model)
 
     # Post-run summary
-    n_convos = len(tasks) * len(variants) * repeat
+    n_runs = sum(len(variants_for_task(t, variants)) for t in tasks)
     typer.echo(f"\nResults saved to: {run_dir}")
-    typer.echo(f"  {len(tasks)} task(s) x {len(variants)} variant(s) x {repeat} repeat(s) = {n_convos} conversation(s)")
+    typer.echo(
+        f"  {len(tasks)} task(s), {n_runs} (task, variant) run(s) x {repeat} repeat(s) = {n_runs * repeat} conversation(s)"
+    )
 
     if grade:
         typer.echo("\nGrading...")

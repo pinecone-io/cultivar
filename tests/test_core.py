@@ -419,14 +419,14 @@ class TestContextRefs:
     def _import(self):
         try:
             from evals.framework.grader import (
-                CONTEXT_REFS_CAP_BYTES,
+                CONTEXT_REFS_CAP_CHARS,
                 build_grader_prompt,
                 load_context_refs,
             )
 
             self.load = load_context_refs
             self.build = build_grader_prompt
-            self.cap = CONTEXT_REFS_CAP_BYTES
+            self.cap = CONTEXT_REFS_CAP_CHARS
         except ImportError:
             pytest.skip("anthropic SDK not installed")
 
@@ -450,14 +450,14 @@ class TestContextRefs:
         assert "```markdown" in out
         assert "n8n best practices" in out
 
-    def test_caps_total_bytes_with_note(self, tmp_path, monkeypatch):
+    def test_caps_total_chars_with_note(self, tmp_path, monkeypatch):
         """A single oversized ref should be truncated and the cap note appended."""
         monkeypatch.chdir(tmp_path)
         (tmp_path / "huge.md").write_text("x" * (self.cap + 5_000))
         out = self.load(["huge.md"])
         assert len(out) <= self.cap + 500  # allow for headers + note
         assert "file truncated" in out
-        assert "byte cap" in out
+        assert "character cap" in out
 
     def test_build_grader_prompt_includes_refs(self):
         """When refs_content is passed, it appears in the final prompt before examples."""
