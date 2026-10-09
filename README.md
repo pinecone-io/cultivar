@@ -120,7 +120,7 @@ cultivar hello --no-grade           # just exercise the runner (no API key neede
 cultivar run --skill my-skill --runner claude --task my-task -v with-skill --remote
 
 # All tasks + every applicable variant (with-skill, without-skill, and with-docs
-# for tasks that declare context_refs)
+# for tasks that declare context_refs, or one per label for doc_versions)
 cultivar run --skill my-skill --runner claude --remote
 
 # 3 runs per (task, variant) for reliability, 5 sandboxes at once
@@ -252,7 +252,7 @@ Each runner advertises three variants:
 
 - `with-skill` — skill loaded, agent invoked via `/<skill-name>`
 - `without-skill` — same agent, no skill loaded and no `Use the /<skill>` prefix in the prompt
-- `with-docs` — same as without-skill, but the task's `context_refs` files are prepended to the prompt as raw reference material (local files or `http(s)://` URLs, fetched live and cached under `./.docs_cache`). Only runs for tasks that declare `context_refs`.
+- `with-docs` — same as without-skill, but the task's `context_refs` are prepended to the prompt as reference material (local files or `http(s)://` URLs, fetched once and reused from `./.docs_cache`). Requires nonempty `context_refs`; nonempty `doc_versions` takes precedence and replaces it with one `with-docs:<label>` run per label (see below).
 
 Two deltas to read:
 
@@ -261,12 +261,12 @@ Two deltas to read:
 | with-skill vs without-skill | Is the skill doing anything at all? |
 | with-skill vs with-docs | Is my distilled skill better than just dumping the docs into the prompt? |
 
-With `--remote`, each `(task, variant, repeat)` runs in its own Modal sandbox in parallel — three variants on one task means three sandboxes, run concurrently up to `--parallel N` (default 5). Apples-to-apples baseline; same image, only the prompt + skill mounting differ. See [docs/concepts.md](docs/concepts.md#the-controls-with-skill-without-skill-with-docs) for the full discussion and [docs/task-yaml.md](docs/task-yaml.md#variants) for how to add `context_refs` to a task.
+With `--remote`, each `(task, variant, repeat)` runs in its own Modal sandbox in parallel, up to `--parallel N` (default 5). The sandbox count is the number of selected variants after per-task filtering and `doc_versions` expansion, multiplied by `--repeat`. Without `--variant`, the default sweep uses the variants described above. The variants share the same base image and task; prompts, skill mounting, and runner-specific tool or instruction flags differ. See [docs/concepts.md](docs/concepts.md#the-controls-with-skill-without-skill-with-docs) for the full discussion and [docs/task-yaml.md](docs/task-yaml.md#variants) for how to add `context_refs` to a task.
 
-**Testing docs, not skills (Claude runner only):** three more real `--variant` choices, opt-in, not part of the default sweep above.
+**Testing docs, not skills (Claude runner only):** three more real `--variant` choices. `without-docs` and `self-navigate` are opt-in; `with-docs:<label>` enters the default sweep on its own whenever a task declares nonempty `doc_versions`. That expansion runs on every runner, but only Claude prepends the labeled content today.
 
 - `without-docs` — identical to without-skill, named for docs-testing clarity
-- `self-navigate` — no injected reference material, but WebFetch is enabled and the task's `self_navigate_refs` gives it a starting page; tests whether the agent can find the right doc on its own (with-docs tests whether the content is good once handed over)
+- `self-navigate` — prepends starting-reference content from `self_navigate_refs` and enables WebFetch so the agent can find further docs. Tests whether the agent can find the right doc on its own; with-docs tests whether the content is good once handed over. Select explicitly with `--variant self-navigate`.
 - `with-docs:<label>` — set `ground_truth.doc_versions: {label: [refs]}` instead of flat `context_refs` and `--variant with-docs` auto-expands into one real run per version, graded side by side, so comparing two doc versions (e.g. before/after a rewrite) is one command, not two runs you diff by hand. The same labels expand `--variant self-navigate` into `self-navigate:<label>`, so both versions can be tested with identical treatment (a starting page plus WebFetch).
 
 Also pin the agent's model with `--model <id>` (e.g. `claude-sonnet-5`, Claude runner only) to re-run the same task set under a different model; unset uses the CLI's own default.

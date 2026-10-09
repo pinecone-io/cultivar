@@ -107,7 +107,7 @@ Full prompt anatomy + calibration mechanics: [docs/grader.md](../docs/grader.md)
 
 ## Variants
 
-Three of them: `with-skill`, `without-skill`, `with-docs`. The third auto-activates when a task declares `ground_truth.context_refs: [...]`; otherwise it's skipped. The same `context_refs` files are used in two places: the grader prompt (as authoritative reference) and the with-docs runner prompt (prepended to the intent). See [docs/concepts.md#the-controls-with-skill-without-skill-with-docs](../docs/concepts.md#the-controls-with-skill-without-skill-with-docs) and [docs/task-yaml.md#variants](../docs/task-yaml.md#variants).
+Each runner advertises three variants: `with-skill`, `without-skill`, `with-docs`. The third enters the default sweep when a task declares nonempty `ground_truth.context_refs`; otherwise it's skipped. Nonempty `ground_truth.doc_versions` takes precedence and replaces flat with-docs with one `with-docs:<label>` variant per label. The grader reads `context_refs` independently; flat with-docs prepends the same references to the runner prompt. See [docs/concepts.md#the-controls-with-skill-without-skill-with-docs](../docs/concepts.md#the-controls-with-skill-without-skill-with-docs) and [docs/task-yaml.md#variants](../docs/task-yaml.md#variants).
 
 ## Path resolution
 

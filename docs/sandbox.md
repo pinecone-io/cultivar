@@ -7,6 +7,7 @@
 Built once per Modal workspace, cached after the first `--remote` invocation (subsequent cold starts ~5–10 s; first build ~3–5 min):
 
 - `debian_slim` + Python 3.11 + Node 22
+- `curl`, `git`, `jq`, `procps` (apt) + `pyyaml` (pip)
 - `npm install -g @anthropic-ai/claude-code @google/gemini-cli @github/copilot`
 - Runner code mounted from `evals/runners/` into `/workspace/evals/runners/`
 - `evals/remote/entry.py` mounted into the sandbox to invoke the runner class
@@ -23,11 +24,11 @@ Per (task, variant, repeat), one sandbox:
 | **setup** | `task.setup` shell command, if defined | `*.setup.log` (failure aborts the run) |
 | **eval** | `entry.py` → real runner class → JSON result on stdout | `sandbox_timing.eval_s` |
 | **verify** | `task.verify` shell command, if defined; stdout passed to grader | `*.verify.log`; stdout in `result.verify_output` |
-| **workdir capture** | `find /workspace/app -type f` + per-file `sb.filesystem.read_bytes(path)` → local `write_bytes` | `*.workdir/` |
+| **workdir capture** | `find /workspace/app -type f` + per-file `sb.filesystem.read_bytes(path)` → local `write_bytes` (skips `__pycache__`, `.venv`, `node_modules`, `.git`) | `*.workdir/` |
 | **teardown** | `task.teardown` shell command, if defined | `*.teardown.log` |
 | **terminate** | `sb.terminate()` (in `finally`) | always runs |
 
-Each phase is timed; per-phase splits live in `result["sandbox_timing"]` and show in `cultivar report`.
+The full set in `result["sandbox_timing"]` is `create_s`, `setup_s`, `eval_s`, `teardown_s`, `total_s`; `cultivar report` shows the first four. Note `teardown_s` is measured from the end of the agent run, so it also absorbs **verify** and **workdir capture** in addition to the teardown command.
 
 ## Hard timeout
 
@@ -79,7 +80,7 @@ If you belong to multiple Modal workspaces, switch with `modal profile activate 
 
 ## Adding a CLI tool for a specific skill
 
-The base image includes the three agent CLIs and nothing else. If your tasks need an
+The base image includes the three agent CLIs plus a few basics (`curl`, `git`, `jq`, `procps`). If your tasks need an
 additional CLI (e.g. `pc`, `gh`, `aws`), install it in the task `setup` field — it runs
 inside the sandbox before the agent starts:
 
