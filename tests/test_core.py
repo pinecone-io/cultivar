@@ -2364,13 +2364,15 @@ class TestSandboxPassthroughEnv:
         token_file.write_text("second")
         assert self._env(**base)["ANTHROPIC_IDENTITY_TOKEN"] == "second"
 
-    def test_literal_token_wins_over_file(self, tmp_path):
+    def test_token_file_wins_over_literal(self, tmp_path):
+        token_file = tmp_path / "jwt"
+        token_file.write_text("fresh")
         env = self._env(
             CULTIVAR_SANDBOX_ENV_PASSTHROUGH="ANTHROPIC_IDENTITY_TOKEN,ANTHROPIC_IDENTITY_TOKEN_FILE",
-            ANTHROPIC_IDENTITY_TOKEN="literal",
-            ANTHROPIC_IDENTITY_TOKEN_FILE=str(tmp_path / "missing"),
+            ANTHROPIC_IDENTITY_TOKEN="stale",
+            ANTHROPIC_IDENTITY_TOKEN_FILE=str(token_file),
         )
-        assert env == {"ANTHROPIC_IDENTITY_TOKEN": "literal"}
+        assert env == {"ANTHROPIC_IDENTITY_TOKEN": "fresh"}
 
     def test_unreadable_token_file_raises_without_contents(self, tmp_path):
         from evals.remote.sandbox_env import SandboxEnvError

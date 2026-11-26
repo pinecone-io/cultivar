@@ -82,7 +82,7 @@ If you belong to multiple Modal workspaces, switch with `modal profile activate 
 
 The named secret is shared by everyone in the workspace and is the same for every run. Credentials that only exist on the machine starting the run, such as a short-lived CI token, can't go there. List them in `CULTIVAR_SANDBOX_ENV_PASSTHROUGH` instead (comma-separated variable names). For each sandbox, cultivar copies the named variables that are set in its own environment into a Modal secret built just for that sandbox, mounted next to the named one. Names that are unset or empty are skipped. Values are never logged. Unset, nothing extra is mounted.
 
-`ANTHROPIC_IDENTITY_TOKEN_FILE` is the one special case: its path exists only on your machine, so cultivar reads the file and passes the contents as `ANTHROPIC_IDENTITY_TOKEN`. The file is read again for every sandbox, so a token refreshed between runs reaches the next sandbox. If you pass both variables, the literal `ANTHROPIC_IDENTITY_TOKEN` wins.
+`ANTHROPIC_IDENTITY_TOKEN_FILE` is the one special case: its path exists only on your machine, so cultivar reads the file and passes the contents as `ANTHROPIC_IDENTITY_TOKEN`. The file is read again for every sandbox, so a token refreshed between runs reaches the next sandbox. If you pass both variables, the file wins, as it does in the Anthropic SDK.
 
 ### Claude with workload identity federation from GitHub Actions
 

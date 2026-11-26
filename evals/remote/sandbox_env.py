@@ -16,15 +16,16 @@ def sandbox_passthrough_env(environ: Mapping[str, str] | None = None) -> dict[st
 
     A passed-through ANTHROPIC_IDENTITY_TOKEN_FILE names a path on this machine that
     the sandbox doesn't have, so its contents are sent as ANTHROPIC_IDENTITY_TOKEN
-    instead. The file is read at every call, so each sandbox gets the token as it
-    stands when that sandbox is created.
+    instead, replacing any passed-through literal token, as the Anthropic SDK does.
+    The file is read at every call, so each sandbox gets the token as it stands when
+    that sandbox is created.
     """
     env = os.environ if environ is None else environ
     names = [n.strip() for n in env.get(PASSTHROUGH_VAR, "").split(",") if n.strip()]
     passed = {n: env[n] for n in names if env.get(n)}
 
     token_file = passed.pop(TOKEN_FILE_VAR, None)
-    if token_file and TOKEN_VAR not in passed:
+    if token_file:
         try:
             token = Path(token_file).read_text().strip()
         except OSError as e:
