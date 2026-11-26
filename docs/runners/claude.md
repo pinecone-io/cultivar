@@ -8,13 +8,13 @@ Wraps [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude`) as a
 npm install -g @anthropic-ai/claude-code
 ```
 
-In Modal sandboxes the CLI is preinstalled in the image; auth comes from `ANTHROPIC_API_KEY` in `eval-sandbox-secrets`.
+In Modal sandboxes the CLI is preinstalled in the image; auth comes from `ANTHROPIC_API_KEY` in `eval-sandbox-secrets`, or from per-run env (see below).
 
 ## Auth
 
 Locally, `claude` uses whatever auth you've already set up — it OAuths on first run (or reads `ANTHROPIC_API_KEY`). No extra setup beyond a working `claude` CLI.
 
-In Modal sandboxes the key is injected via `eval-sandbox-secrets` (the secret name defaults to that, configurable via `CULTIVAR_MODAL_SECRET`). Note the grader always runs locally and needs its own `ANTHROPIC_API_KEY` regardless of where the agent ran.
+In Modal sandboxes the key is injected via `eval-sandbox-secrets` (the secret name defaults to that, configurable via `CULTIVAR_MODAL_SECRET`). For workload identity federation, pass the federation variables per run with `CULTIVAR_SANDBOX_ENV_PASSTHROUGH` instead; see [docs/sandbox.md](../sandbox.md#passing-per-run-env-into-sandboxes). Note the grader always runs locally and needs its own Anthropic credentials regardless of where the agent ran ([docs/grader.md](../grader.md#required-env)).
 
 ## How it's invoked
 

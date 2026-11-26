@@ -20,7 +20,7 @@ cultivar evals.
 5. Iterate on the skill; re-run; compare.
 
 Always confirm the install first with `cultivar hello` (or `cultivar hello --no-grade`
-when no `ANTHROPIC_API_KEY` is available) — it runs a packaged smoke task end-to-end.
+when no Anthropic credentials are available) — it runs a packaged smoke task end-to-end.
 
 ## Commands
 
@@ -116,7 +116,9 @@ if you don't want your interactive coding agent to auto-load them.
   isolation, parallelism, reproducibility. Requires a Modal account (`modal token new`)
   and a secret holding the agent's `ANTHROPIC_API_KEY` (default secret name
   `eval-sandbox-secrets`; override with `CULTIVAR_MODAL_SECRET`). Prefer `--remote` for
-  rigorous comparisons. The grader always runs locally and needs `ANTHROPIC_API_KEY`.
+  rigorous comparisons. The grader always runs locally and needs Anthropic credentials.
+  For CI with workload identity federation, `CULTIVAR_SANDBOX_ENV_PASSTHROUGH` copies the
+  federation variables into each sandbox (see docs/sandbox.md).
 
 ## Reading results
 
@@ -127,7 +129,8 @@ grader's reasoning + suggestions on a failure.
 
 ## Gotchas
 
-- Grading needs `ANTHROPIC_API_KEY` (loaded from a `.env` in the cwd). `hello --no-grade`
+- Grading needs Anthropic credentials (loaded from a `.env` in the cwd): `ANTHROPIC_API_KEY`,
+  `ANTHROPIC_AUTH_TOKEN`, or the workload identity federation variables. `hello --no-grade`
   and `run --dry-run` need no key.
 - A grader call that fails is recorded as a FAIL for that conversation and the run
   continues. Auth and permission errors abort the whole grading run immediately.

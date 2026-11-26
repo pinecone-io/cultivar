@@ -18,6 +18,7 @@ import typer
 import yaml
 from rich.table import Table
 
+from evals.framework.anthropic_auth import ACCEPTED_CREDENTIALS, anthropic_credential_source
 from evals.framework.reporting import console, resolve_results_base
 from evals.run import RUNNER_CLASSES, run_local, run_remote
 
@@ -68,13 +69,16 @@ def _preflight(runner: str, grade: bool, remote: bool) -> list[dict]:
     )
 
     if grade:
-        has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+        source = anthropic_credential_source()
         rows.append(
             {
-                "name": "ANTHROPIC_API_KEY (grader)",
-                "ok": has_key,
-                "detail": "set" if has_key else "missing",
-                "hint": "" if has_key else "Add to .env in cwd or export in shell — or pass --no-grade.",
+                "name": "Anthropic credentials (grader)",
+                "ok": source is not None,
+                "detail": source or "missing",
+                "hint": ""
+                if source
+                else "Set one of: " + "; ".join(ACCEPTED_CREDENTIALS) + " — in .env in cwd or your shell, "
+                "or pass --no-grade.",
             }
         )
         has_ts_key = bool(os.environ.get("TYPESAFE_API_KEY"))
@@ -140,7 +144,7 @@ def main(
     runner: str = typer.Option("claude", "--runner", "-r", help="Agent CLI to smoke-test: claude, copilot, or gemini."),
     remote: bool = typer.Option(False, "--remote", help="Run the smoke in a Modal sandbox instead of locally."),
     grade: bool = typer.Option(
-        True, "--grade/--no-grade", help="Grade the smoke after it runs. Requires ANTHROPIC_API_KEY."
+        True, "--grade/--no-grade", help="Grade the smoke after it runs. Requires Anthropic credentials."
     ),
     variant: str = typer.Option(
         "with-skill",
@@ -164,7 +168,7 @@ def main(
     Examples:
       cultivar hello                              # claude, local, with-skill, graded
       cultivar hello --runner claude --remote     # confirm Modal + secret are set up
-      cultivar hello --no-grade                   # skip grading (no ANTHROPIC_API_KEY)
+      cultivar hello --no-grade                   # skip grading (no Anthropic credentials)
       cultivar hello -v ""                        # both smoke variants: with-skill + without-skill (slower)
     """
     runner_cls = RUNNER_CLASSES.get(runner)

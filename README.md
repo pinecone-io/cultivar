@@ -58,6 +58,7 @@ The first `--remote` run builds the sandbox image (~3–5 min). Subsequent runs 
 |---|---|---|
 | `CULTIVAR_MODAL_SECRET` | `eval-sandbox-secrets` | Name of the Modal secret mounted into each sandbox |
 | `CULTIVAR_MODAL_APP` | `cultivar` | Modal app name (useful for isolating runs across teams or projects) |
+| `CULTIVAR_SANDBOX_ENV_PASSTHROUGH` | unset | Comma-separated env var names copied from your environment into each sandbox, e.g. for workload identity federation from CI ([docs/sandbox.md](docs/sandbox.md#passing-per-run-env-into-sandboxes)) |
 
 For workspace sharing, custom images, and debugging sandbox failures, see [docs/sandbox.md](docs/sandbox.md).
 
@@ -105,7 +106,7 @@ cultivar run --skill my-skill --runner claude --remote --grade
 After `uv tool install`, verify the install works end-to-end with the packaged smoke:
 
 ```bash
-cultivar hello                      # local: agent + grader (needs ANTHROPIC_API_KEY)
+cultivar hello                      # local: agent + grader (needs Anthropic credentials)
 cultivar hello --remote             # also exercises Modal + eval-sandbox-secrets
 cultivar hello --no-grade           # just exercise the runner (no API key needed)
 ```
@@ -234,7 +235,7 @@ Easiest path (assumes you have a Modal workspace set up):
    ```
 3. Billing accrues to your Modal account regardless of who runs what — set an expected budget if needed.
 
-The only key your coworkers personally need is `ANTHROPIC_API_KEY` (the grader runs locally) — or `TYPESAFE_API_KEY` instead, if your tasks grade with `--backend typesafe`. For local (non-remote) agent runs they also need whatever the relevant agent CLI requires (Claude OAuths via `claude` on first run; Copilot needs `COPILOT_GITHUB_TOKEN` with the "Copilot Requests" fine-grained PAT scope; Gemini needs `GEMINI_API_KEY`).
+The only credential your coworkers personally need is for the grader, which runs locally: `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or workload identity federation (see [docs/grader.md](docs/grader.md#required-env)) — or `TYPESAFE_API_KEY` instead, if your tasks grade with `--backend typesafe`. For local (non-remote) agent runs they also need whatever the relevant agent CLI requires (Claude OAuths via `claude` on first run; Copilot needs `COPILOT_GITHUB_TOKEN` with the "Copilot Requests" fine-grained PAT scope; Gemini needs `GEMINI_API_KEY`).
 
 
 

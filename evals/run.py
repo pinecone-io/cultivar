@@ -13,6 +13,7 @@ from pathlib import Path
 import typer
 import yaml
 
+from evals.framework.anthropic_auth import anthropic_credential_source, missing_credentials_help
 from evals.framework.reporting import resolve_results_base, resolve_skills_base
 from evals.runners.claude import ClaudeRunner
 from evals.runners.copilot import CopilotRunner
@@ -472,8 +473,8 @@ def main(
         False,
         "--grade",
         help=(
-            "After runs finish, invoke the grader and print a report. Needs the key for whichever "
-            "backend grades: ANTHROPIC_API_KEY by default, TYPESAFE_API_KEY with --grade-backend typesafe."
+            "After runs finish, invoke the grader and print a report. Needs credentials for whichever "
+            "backend grades: Anthropic credentials by default, TYPESAFE_API_KEY with --grade-backend typesafe."
         ),
     ),
     grade_backend: str = typer.Option(
@@ -606,13 +607,18 @@ def main(
     validate_env_vars(tasks)
 
     if grade:
-        key_name = "TYPESAFE_API_KEY" if grade_backend == "typesafe" else "ANTHROPIC_API_KEY"
-        if not os.environ.get(key_name):
-            example = "..." if key_name == "TYPESAFE_API_KEY" else "sk-ant-..."
+        if grade_backend == "typesafe":
+            if not os.environ.get("TYPESAFE_API_KEY"):
+                typer.echo(
+                    "Error: --grade --grade-backend typesafe requires TYPESAFE_API_KEY.\n"
+                    "Add TYPESAFE_API_KEY=... to a .env in this directory (auto-loaded),\n"
+                    "or `export TYPESAFE_API_KEY=...` in your shell."
+                )
+                raise typer.Exit(1)
+        elif anthropic_credential_source() is None:
             typer.echo(
-                f"Error: --grade --grade-backend {grade_backend} requires {key_name}.\n"
-                f"Add {key_name}={example} to a .env in this directory (auto-loaded),\n"
-                f"or `export {key_name}=...` in your shell."
+                f"Error: --grade --grade-backend {grade_backend} needs Anthropic credentials.\n"
+                f"{missing_credentials_help()}"
             )
             raise typer.Exit(1)
         # Only the flag's backend is checked: per-task `grader_backend` pins are

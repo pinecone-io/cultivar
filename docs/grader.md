@@ -20,7 +20,7 @@ Two graders. **Claude is the default and nothing changes unless you opt in.**
 | `evidence` | A quote from the run | **None** — says so in plain text |
 | `reasoning` | 1–2 sentences the model wrote | Mechanical: the probability and threshold |
 | `suggestions` | Model-written `cause`/`fix` | Mapped in code from a `failure_kind` label |
-| Env | `ANTHROPIC_API_KEY` | `TYPESAFE_API_KEY` |
+| Env | Anthropic credentials (see [Required env](#required-env)) | `TYPESAFE_API_KEY` |
 
 ```bash
 cultivar grade latest                      # claude (default)
@@ -107,7 +107,13 @@ No API calls, no `grades.json`. Token counts are estimates (3.5 chars/token, del
 
 ## Required env
 
-`ANTHROPIC_API_KEY` for the default backend. `TYPESAFE_API_KEY` only if you use `--backend typesafe`. Drop either in `.env` in your cwd; they're auto-loaded. A run only requires the keys its tasks actually need, and a missing key fails immediately with a clear message rather than falling back to the other backend — a Claude verdict written into a run you asked TypeSafe to grade would make `grades.json` lie.
+The default backend accepts any credential the Anthropic SDK reads from the environment:
+
+- `ANTHROPIC_API_KEY`
+- `ANTHROPIC_AUTH_TOKEN`
+- workload identity federation: `ANTHROPIC_FEDERATION_RULE_ID` and `ANTHROPIC_ORGANIZATION_ID`, plus `ANTHROPIC_IDENTITY_TOKEN` or `ANTHROPIC_IDENTITY_TOKEN_FILE` (optionally `ANTHROPIC_SERVICE_ACCOUNT_ID` / `ANTHROPIC_WORKSPACE_ID`). The SDK exchanges the identity token, for example a GitHub Actions OIDC token, for a short-lived Anthropic access token. See [docs/sandbox.md](sandbox.md#claude-with-workload-identity-federation-from-github-actions) for a CI setup.
+
+If more than one is set, a static key or token wins over federation. `TYPESAFE_API_KEY` only if you use `--backend typesafe`. Drop any of these in `.env` in your cwd; they're auto-loaded. A run only requires the keys its tasks actually need, and a missing key fails immediately with a clear message rather than falling back to the other backend — a Claude verdict written into a run you asked TypeSafe to grade would make `grades.json` lie.
 
 ## Model
 
