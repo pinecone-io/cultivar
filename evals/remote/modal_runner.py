@@ -12,6 +12,8 @@ from pathlib import Path
 
 import modal
 
+from evals.remote.sandbox_env import sandbox_passthrough_env
+
 # Name of the Modal secret mounted into each sandbox. Override with env var
 # to use a different secret name without patching the source.
 SECRET_NAME = os.environ.get("CULTIVAR_MODAL_SECRET", "eval-sandbox-secrets")
@@ -61,6 +63,9 @@ def run_one_remote(
 ) -> dict:
     """Run a single eval task in a Modal sandbox. Returns the runner result dict."""
     secrets = [modal.Secret.from_name(SECRET_NAME)]
+    passthrough = sandbox_passthrough_env()
+    if passthrough:
+        secrets.append(modal.Secret.from_dict({**passthrough}))
     image = eval_image
 
     # Bake skill files into the image if needed

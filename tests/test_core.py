@@ -557,6 +557,16 @@ class TestRemediationSuggestions:
 # ---------------------------------------------------------------------------
 
 
+_ANTHROPIC_CREDENTIAL_VARS = (
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_FEDERATION_RULE_ID",
+    "ANTHROPIC_ORGANIZATION_ID",
+    "ANTHROPIC_IDENTITY_TOKEN",
+    "ANTHROPIC_IDENTITY_TOKEN_FILE",
+)
+
+
 class TestHelloPreflight:
     """_preflight aggregates setup checks; no I/O beyond fs/env so it's testable."""
 
@@ -593,19 +603,34 @@ class TestHelloPreflight:
         assert r["ok"] is False
         assert "npm install" in r["hint"]
 
-    def test_grade_requires_anthropic_key(self, monkeypatch):
-        """With grading on, missing ANTHROPIC_API_KEY is a blocking row."""
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    def test_grade_requires_anthropic_credentials(self, monkeypatch):
+        """With grading on, no Anthropic credentials at all is a blocking row."""
+        for name in _ANTHROPIC_CREDENTIAL_VARS:
+            monkeypatch.delenv(name, raising=False)
         rows = self.hello._preflight("claude", grade=True, remote=False)
-        r = self._row(rows, "ANTHROPIC_API_KEY")
+        r = self._row(rows, "Anthropic credentials")
         assert r["ok"] is False
         assert "--no-grade" in r["hint"]
+        for option in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_FEDERATION_RULE_ID"):
+            assert option in r["hint"]
 
     def test_grade_passes_when_key_present(self, monkeypatch):
         """Key set → grader row ok."""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         rows = self.hello._preflight("claude", grade=True, remote=False)
-        assert self._row(rows, "ANTHROPIC_API_KEY")["ok"] is True
+        assert self._row(rows, "Anthropic credentials")["ok"] is True
+
+    def test_grade_passes_with_federation(self, monkeypatch):
+        """Federation variables alone satisfy the grader row."""
+        for name in _ANTHROPIC_CREDENTIAL_VARS:
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("ANTHROPIC_FEDERATION_RULE_ID", "fdrl_test")
+        monkeypatch.setenv("ANTHROPIC_ORGANIZATION_ID", "org-test")
+        monkeypatch.setenv("ANTHROPIC_IDENTITY_TOKEN", "jwt")
+        rows = self.hello._preflight("claude", grade=True, remote=False)
+        r = self._row(rows, "Anthropic credentials")
+        assert r["ok"] is True
+        assert r["detail"] == "workload identity federation"
 
     def test_remote_modal_auth_missing(self, monkeypatch):
         """No ~/.modal.toml and no MODAL_TOKEN_ID → Modal auth row fails."""
@@ -2238,3 +2263,189 @@ class TestSectionParityCatchesNewSections:
             {"ground_truth": {"criteria": "C"}}, "CONV", verify_exit_code=0
         )
         assert "PASSED" in state["verification_result"]
+
+
+_FEDERATION = {
+    "ANTHROPIC_FEDERATION_RULE_ID": "fdrl_test",
+    "ANTHROPIC_ORGANIZATION_ID": "org-test",
+}
+
+
+class TestAnthropicCredentialSource:
+    @pytest.mark.parametrize(
+        "env, expected",
+        [
+            ({}, None),
+            ({"ANTHROPIC_API_KEY": "sk-ant-x"}, "ANTHROPIC_API_KEY"),
+            ({"ANTHROPIC_AUTH_TOKEN": "tok"}, "ANTHROPIC_AUTH_TOKEN"),
+            ({**_FEDERATION, "ANTHROPIC_IDENTITY_TOKEN": "jwt"}, "workload identity federation"),
+            ({**_FEDERATION, "ANTHROPIC_IDENTITY_TOKEN_FILE": "/tmp/jwt"}, "workload identity federation"),
+            ({**_FEDERATION, "ANTHROPIC_API_KEY": "sk-ant-x", "ANTHROPIC_IDENTITY_TOKEN": "jwt"}, "ANTHROPIC_API_KEY"),
+            (_FEDERATION, None),
+            ({"ANTHROPIC_FEDERATION_RULE_ID": "fdrl_test", "ANTHROPIC_IDENTITY_TOKEN": "jwt"}, None),
+            ({"ANTHROPIC_ORGANIZATION_ID": "org-test", "ANTHROPIC_IDENTITY_TOKEN": "jwt"}, None),
+            ({"ANTHROPIC_API_KEY": ""}, None),
+            ({**_FEDERATION, "ANTHROPIC_IDENTITY_TOKEN": ""}, None),
+        ],
+    )
+    def test_source(self, env, expected):
+        from evals.framework.anthropic_auth import anthropic_credential_source
+
+        assert anthropic_credential_source(env) == expected
+
+    def test_help_names_every_option(self):
+        from evals.framework.anthropic_auth import missing_credentials_help
+
+        text = missing_credentials_help()
+        for name in (
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "ANTHROPIC_FEDERATION_RULE_ID",
+            "ANTHROPIC_ORGANIZATION_ID",
+            "ANTHROPIC_IDENTITY_TOKEN",
+            "ANTHROPIC_IDENTITY_TOKEN_FILE",
+        ):
+            assert name in text
+
+    def test_grader_guard_accepts_federation(self, monkeypatch):
+        from evals.framework import grader
+
+        for name in _ANTHROPIC_CREDENTIAL_VARS:
+            monkeypatch.delenv(name, raising=False)
+        for k, v in {**_FEDERATION, "ANTHROPIC_IDENTITY_TOKEN": "jwt"}.items():
+            monkeypatch.setenv(k, v)
+        grader._require_anthropic_credentials()
+
+    def test_grader_guard_exits_without_credentials(self, monkeypatch):
+        from evals.framework import grader
+
+        for name in _ANTHROPIC_CREDENTIAL_VARS:
+            monkeypatch.delenv(name, raising=False)
+        with pytest.raises(click.exceptions.Exit):
+            grader._require_anthropic_credentials()
+
+
+class TestSandboxPassthroughEnv:
+    def _env(self, **kw):
+        from evals.remote.sandbox_env import sandbox_passthrough_env
+
+        return sandbox_passthrough_env(kw)
+
+    def test_unset_passes_nothing(self):
+        assert self._env(ANTHROPIC_IDENTITY_TOKEN="jwt") == {}
+
+    def test_named_and_present_only(self):
+        env = self._env(
+            CULTIVAR_SANDBOX_ENV_PASSTHROUGH=" ANTHROPIC_FEDERATION_RULE_ID, ANTHROPIC_ORGANIZATION_ID ,ABSENT,EMPTY,,",
+            ANTHROPIC_FEDERATION_RULE_ID="fdrl_test",
+            ANTHROPIC_ORGANIZATION_ID="org-test",
+            EMPTY="",
+            UNLISTED="secret",
+        )
+        assert env == {"ANTHROPIC_FEDERATION_RULE_ID": "fdrl_test", "ANTHROPIC_ORGANIZATION_ID": "org-test"}
+
+    def test_token_file_becomes_literal_token(self, tmp_path):
+        token_file = tmp_path / "jwt"
+        token_file.write_text("header.payload.sig\n")
+        env = self._env(
+            CULTIVAR_SANDBOX_ENV_PASSTHROUGH="ANTHROPIC_IDENTITY_TOKEN_FILE",
+            ANTHROPIC_IDENTITY_TOKEN_FILE=str(token_file),
+        )
+        assert env == {"ANTHROPIC_IDENTITY_TOKEN": "header.payload.sig"}
+
+    def test_token_file_reread_per_call(self, tmp_path):
+        token_file = tmp_path / "jwt"
+        base = {
+            "CULTIVAR_SANDBOX_ENV_PASSTHROUGH": "ANTHROPIC_IDENTITY_TOKEN_FILE",
+            "ANTHROPIC_IDENTITY_TOKEN_FILE": str(token_file),
+        }
+        token_file.write_text("first")
+        assert self._env(**base)["ANTHROPIC_IDENTITY_TOKEN"] == "first"
+        token_file.write_text("second")
+        assert self._env(**base)["ANTHROPIC_IDENTITY_TOKEN"] == "second"
+
+    def test_token_file_wins_over_literal(self, tmp_path):
+        token_file = tmp_path / "jwt"
+        token_file.write_text("fresh")
+        env = self._env(
+            CULTIVAR_SANDBOX_ENV_PASSTHROUGH="ANTHROPIC_IDENTITY_TOKEN,ANTHROPIC_IDENTITY_TOKEN_FILE",
+            ANTHROPIC_IDENTITY_TOKEN="stale",
+            ANTHROPIC_IDENTITY_TOKEN_FILE=str(token_file),
+        )
+        assert env == {"ANTHROPIC_IDENTITY_TOKEN": "fresh"}
+
+    def test_unreadable_token_file_raises_without_contents(self, tmp_path):
+        from evals.remote.sandbox_env import SandboxEnvError
+
+        with pytest.raises(SandboxEnvError, match="missing"):
+            self._env(
+                CULTIVAR_SANDBOX_ENV_PASSTHROUGH="ANTHROPIC_IDENTITY_TOKEN_FILE",
+                ANTHROPIC_IDENTITY_TOKEN_FILE=str(tmp_path / "missing"),
+            )
+
+    def test_empty_token_file_raises(self, tmp_path):
+        from evals.remote.sandbox_env import SandboxEnvError
+
+        token_file = tmp_path / "jwt"
+        token_file.write_text("\n")
+        with pytest.raises(SandboxEnvError, match="empty"):
+            self._env(
+                CULTIVAR_SANDBOX_ENV_PASSTHROUGH="ANTHROPIC_IDENTITY_TOKEN_FILE",
+                ANTHROPIC_IDENTITY_TOKEN_FILE=str(token_file),
+            )
+
+
+class TestModalRunnerSecrets:
+    """run_one_remote's secrets list, with the modal module replaced by a mock."""
+
+    class _Stop(Exception):
+        pass
+
+    @pytest.fixture
+    def modal_runner(self, monkeypatch):
+        import importlib
+        import sys
+        from unittest.mock import MagicMock
+
+        fake_modal = MagicMock()
+        fake_modal.Sandbox.create.side_effect = self._Stop
+        monkeypatch.setitem(sys.modules, "modal", fake_modal)
+        monkeypatch.delitem(sys.modules, "evals.remote.modal_runner", raising=False)
+        module = importlib.import_module("evals.remote.modal_runner")
+        yield module, fake_modal
+        sys.modules.pop("evals.remote.modal_runner", None)
+
+    def _secrets(self, modal_runner):
+        module, fake_modal = modal_runner
+        with pytest.raises(self._Stop):
+            module.run_one_remote(runner="claude", intent="x", variant="without-skill")
+        return fake_modal.Sandbox.create.call_args.kwargs["secrets"]
+
+    def test_unset_keeps_only_named_secret(self, modal_runner, monkeypatch):
+        monkeypatch.delenv("CULTIVAR_SANDBOX_ENV_PASSTHROUGH", raising=False)
+        secrets = self._secrets(modal_runner)
+        _, fake_modal = modal_runner
+        assert secrets == [fake_modal.Secret.from_name.return_value]
+        fake_modal.Secret.from_dict.assert_not_called()
+
+    def test_passthrough_adds_dict_secret(self, modal_runner, monkeypatch, tmp_path):
+        token_file = tmp_path / "jwt"
+        token_file.write_text("jwt-value")
+        monkeypatch.setenv(
+            "CULTIVAR_SANDBOX_ENV_PASSTHROUGH",
+            "ANTHROPIC_FEDERATION_RULE_ID,ANTHROPIC_ORGANIZATION_ID,ANTHROPIC_IDENTITY_TOKEN_FILE",
+        )
+        monkeypatch.setenv("ANTHROPIC_FEDERATION_RULE_ID", "fdrl_test")
+        monkeypatch.setenv("ANTHROPIC_ORGANIZATION_ID", "org-test")
+        monkeypatch.setenv("ANTHROPIC_IDENTITY_TOKEN_FILE", str(token_file))
+        monkeypatch.delenv("ANTHROPIC_IDENTITY_TOKEN", raising=False)
+        secrets = self._secrets(modal_runner)
+        _, fake_modal = modal_runner
+        fake_modal.Secret.from_dict.assert_called_once_with(
+            {
+                "ANTHROPIC_FEDERATION_RULE_ID": "fdrl_test",
+                "ANTHROPIC_ORGANIZATION_ID": "org-test",
+                "ANTHROPIC_IDENTITY_TOKEN": "jwt-value",
+            }
+        )
+        assert secrets == [fake_modal.Secret.from_name.return_value, fake_modal.Secret.from_dict.return_value]

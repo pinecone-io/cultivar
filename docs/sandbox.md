@@ -78,6 +78,44 @@ The secret is **named** `eval-sandbox-secrets` by default. To use a different na
 
 If you belong to multiple Modal workspaces, switch with `modal profile activate <name>` or set `MODAL_PROFILE` for a single command.
 
+## Passing per-run env into sandboxes
+
+The named secret is shared by everyone in the workspace and is the same for every run. Credentials that only exist on the machine starting the run, such as a short-lived CI token, can't go there. List them in `CULTIVAR_SANDBOX_ENV_PASSTHROUGH` instead (comma-separated variable names). For each sandbox, cultivar copies the named variables that are set in its own environment into a Modal secret built just for that sandbox, mounted next to the named one. Names that are unset or empty are skipped. Values are never logged. Unset, nothing extra is mounted.
+
+`ANTHROPIC_IDENTITY_TOKEN_FILE` is the one special case: its path exists only on your machine, so cultivar reads the file and passes the contents as `ANTHROPIC_IDENTITY_TOKEN`. The file is read again for every sandbox, so a token refreshed between runs reaches the next sandbox. If you pass both variables, the file wins, as it does in the Anthropic SDK.
+
+### Claude with workload identity federation from GitHub Actions
+
+Workload identity federation lets a GitHub Actions job authenticate to Anthropic with the short-lived OIDC token GitHub issues to that job, instead of a stored API key. The Claude CLI in the sandbox does the token exchange itself, so it needs the GitHub token and the federation IDs:
+
+```yaml
+permissions:
+  id-token: write
+  contents: read
+
+steps:
+  - name: Fetch GitHub OIDC token for Anthropic
+    run: |
+      curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+        "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=https://api.anthropic.com" \
+        | jq -r .value > "$RUNNER_TEMP/anthropic-identity-token"
+      echo "ANTHROPIC_IDENTITY_TOKEN_FILE=$RUNNER_TEMP/anthropic-identity-token" >> "$GITHUB_ENV"
+
+  - name: Run evals
+    env:
+      ANTHROPIC_FEDERATION_RULE_ID: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+      ANTHROPIC_ORGANIZATION_ID: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+      ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}  # if your rule needs it
+      CULTIVAR_SANDBOX_ENV_PASSTHROUGH: >-
+        ANTHROPIC_FEDERATION_RULE_ID,ANTHROPIC_ORGANIZATION_ID,
+        ANTHROPIC_SERVICE_ACCOUNT_ID,ANTHROPIC_WORKSPACE_ID,ANTHROPIC_IDENTITY_TOKEN_FILE
+    run: cultivar run --skill my-skill --runner claude --remote --grade
+```
+
+The same variables authenticate the grader, which runs on the runner and reads the token file directly.
+
+GitHub OIDC tokens expire within minutes. Re-fetch the file before each long step, since every sandbox and every grader token exchange reads it fresh. Remove `ANTHROPIC_API_KEY` from the named Modal secret: a static key outranks federation, so a revoked key left there still gets used.
+
 ## Adding a CLI tool for a specific skill
 
 The base image includes the three agent CLIs plus a few basics (`curl`, `git`, `jq`, `procps`). If your tasks need an

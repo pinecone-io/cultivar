@@ -18,7 +18,8 @@ dependencies = [
     "pyyaml",
     "typer",
     "rich",
-    "anthropic",
+    # Floor: the first release whose env credential chain does workload identity federation.
+    "anthropic>=0.98.0",
     # Floor, not a pin: the Sandbox.filesystem namespace this uses replaced an
     # API Modal removed server-side, so an older client resolves fine and then
     # fails at the first sandbox file write.

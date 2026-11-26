@@ -119,7 +119,7 @@ _FAILURE_KINDS: dict[str, dict[str, str]] = {
 def _require_typesafe_key() -> None:
     """Fail fast with a clear message if TYPESAFE_API_KEY isn't set.
 
-    Mirrors the Claude path's `_require_anthropic_key`. Deliberately a hard
+    Mirrors the Claude path's `_require_anthropic_credentials`. Deliberately a hard
     failure rather than a silent fallback to Claude: a run the user asked
     TypeSafe to grade must not end up with Claude's verdicts written into
     grades.json under a `typesafe` label.

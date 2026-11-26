@@ -1,7 +1,6 @@
 """Grade eval results using Claude API with optional calibration examples."""
 
 import json
-import os
 import re
 from contextlib import nullcontext
 from pathlib import Path
@@ -12,6 +11,7 @@ import yaml
 from anthropic import Anthropic, AuthenticationError, PermissionDeniedError
 from anthropic.types import RedactedThinkingBlock, TextBlock, ThinkingBlock
 
+from evals.framework.anthropic_auth import anthropic_credential_source, missing_credentials_help
 from evals.framework.reporting import (
     console,
     gate_verdict,
@@ -21,22 +21,10 @@ from evals.framework.reporting import (
 )
 
 
-def _require_anthropic_key() -> None:
-    """Fail fast with a clear message if ANTHROPIC_API_KEY isn't set.
-
-    The claude backend calls the Anthropic API directly; without the key it throws
-    a raw SDK traceback, which is confusing for new users. Called from any entry
-    point that will reach the Anthropic client.
-    """
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        console.print(
-            "[red]ANTHROPIC_API_KEY is not set.[/red]\n"
-            "The grader needs this to call the Anthropic API.\n\n"
-            "Set it one of these ways:\n"
-            "  - Add [bold]ANTHROPIC_API_KEY=sk-ant-...[/bold] to a .env file "
-            "in your current directory (it's auto-loaded)\n"
-            "  - [bold]export ANTHROPIC_API_KEY=sk-ant-...[/bold] in your shell"
-        )
+def _require_anthropic_credentials() -> None:
+    """Fail fast with a clear message instead of a raw SDK traceback."""
+    if anthropic_credential_source() is None:
+        console.print(f"[red]The grader can't call the Anthropic API.[/red]\n{missing_credentials_help()}")
         raise typer.Exit(1)
 
 
@@ -1001,7 +989,8 @@ def main(
 
     claude (default): builds a text prompt (skill ref + criteria + calibration
     examples + conversation + verify output + workdir files) and calls the
-    Anthropic API. Needs ANTHROPIC_API_KEY.
+    Anthropic API. Needs ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or
+    workload identity federation credentials.
 
     typesafe: sends the same evidence as typed state to TypeSafe System One and
     composes the grade from its judgments. Calibration examples are not used,
@@ -1098,7 +1087,7 @@ def main(
                 _clients[name] = None if dry_run else make_client(chosen)
             return _clients[name], chosen
         if name not in _clients:
-            _require_anthropic_key()
+            _require_anthropic_credentials()
             _clients[name] = Anthropic()
         return _clients[name], model
 
@@ -1117,7 +1106,7 @@ def main(
 
     if not dry_run:
         if BACKEND_CLAUDE in needed:
-            _require_anthropic_key()
+            _require_anthropic_credentials()
         if BACKEND_TYPESAFE in needed:
             from evals.framework.typesafe_grader import _require_typesafe_key
 
